@@ -1,0 +1,124 @@
+/* ============================================================================
+   MesaOS — Midnight (Soft) Theme
+   ----------------------------------------------------------------------------
+   Tailwind v4 design tokens. This file is the SINGLE SOURCE OF TRUTH for the
+   app's color system: every bg-*, text-*, border-*, ring-* utility the UI uses
+   resolves to a variable defined here. Re-theming the whole app = editing the
+   values in the @theme block below.
+
+   Why this file matters: the UI was written against tokens (bg-panel-card,
+   text-ink-50, border-border, bg-ai, state-*, font-display) that previously
+   had NO definition in CSS or in a Tailwind-v4-loaded config. Undefined
+   surfaces fell back to transparent (showing the pure-black <body> through),
+   and undefined border colors fell back to `currentColor` (rendering as the
+   white outlines you saw). Defining the tokens here both fixes that breakage
+   and applies the softened, low-strain palette.
+   ========================================================================== */
+
+@import "tailwindcss";
+
+/* --- Color system (tweak here) ------------------------------------------ */
+@theme {
+  /* Canvas + elevation ladder. Each step is one notch lighter than the last,
+     so depth is communicated by surface FILL instead of drawn outlines. */
+  --color-bg:         #121214;  /* app canvas (was pure black #000)        */
+  --color-panel:      #161619;  /* chrome: top bar, sidebars               */
+  --color-panel-card: #1e1e22;  /* cards, calendar cells, inputs (~#1E1E1E)*/
+  --color-panel-up:   #27272c;  /* raised / hover surface                  */
+
+  /* Type. Primary is a soft off-white (kills halation); secondary is muted
+     for hierarchy without leaning on brightness. */
+  --color-ink-50:  #e4e4e7;     /* primary text                            */
+  --color-ink-200: #c4c4cc;     /* mid emphasis                            */
+  --color-ink-400: #a1a1aa;     /* secondary: dates, "party of", meta      */
+
+  /* Borders are now faint hairlines, not high-contrast strokes — this is
+     what dissolves the "vibrating grid" in the calendar and the lists. */
+  --color-border:    rgba(244,244,245,0.07);  /* default hairline          */
+  --color-border-hi: rgba(244,244,245,0.13);  /* hover / active edge       */
+
+  /* Accent — desaturated indigo / slate-blue. Calm, cool, low-strain, and
+     light enough that the dark button text (text-bg) stays legible on it.
+     Prefer sage? Swap these three to:
+       #84b59a / rgba(132,181,154,0.12) / rgba(132,181,154,0.10) */
+  --color-ai:       #818cf8;
+  --color-ai-bg:    rgba(129,140,248,0.12);
+  --color-ai-muted: rgba(129,140,248,0.10);
+
+  /* Reservation states — semantic, desaturated to sit calmly on dark.
+     Each pairs a readable text/dot color with a low-opacity fill. */
+  --color-state-avail:      #52c794;
+  --color-state-availBg:    rgba(82,199,148,0.12);
+  --color-state-seated:     #ec7e7e;
+  --color-state-seatedBg:   rgba(236,126,126,0.12);
+  --color-state-reserved:   #a896e0;
+  --color-state-reservedBg: rgba(168,150,224,0.12);
+  --color-state-dining:     #e0b063;
+  --color-state-diningBg:   rgba(224,176,99,0.12);
+
+  /* Soften Tailwind's built-in pure black/white so any stray bg-black /
+     text-white utilities inherit the same low-strain treatment — no markup
+     changes required. */
+  --color-black: #0c0c0e;
+  --color-white: #f3f3f5;
+}
+
+/* Fonts map to the Next-loaded Geist families (set on <html> in layout.tsx).
+   Kept as `inline` so the runtime CSS vars pass through correctly. */
+@theme inline {
+  --font-sans:    var(--font-geist-sans);
+  --font-mono:    var(--font-geist-mono);
+  --font-display: var(--font-geist-sans);
+}
+
+/* --- Base --------------------------------------------------------------- */
+:root {
+  /* Back-compat aliases for the original template variables. */
+  --background: var(--color-bg);
+  --foreground: var(--color-ink-50);
+  color-scheme: dark;            /* native controls + scrollbars render dark */
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink-50);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  /* Crisper glyph edges => less halation on light text over dark surfaces. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Gentle, consistent interactive feedback. Elements already using transition
+   utilities are unaffected; this just covers the rest so hover/active states
+   ease in and out rather than snapping. */
+button, a, [role="button"], summary {
+  transition: background-color .15s ease, border-color .15s ease,
+              color .15s ease, box-shadow .15s ease;
+}
+
+/* Keyboard focus uses the calm accent instead of the browser default. */
+:focus-visible {
+  outline: 2px solid var(--color-ai);
+  outline-offset: 2px;
+}
+
+/* On-theme text selection. */
+::selection {
+  background: var(--color-ai-bg);
+  color: var(--color-ink-50);
+}
+
+/* Subtle, on-theme scrollbars for the dark console. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-panel-up) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--color-panel-up);
+  border-radius: 9999px;
+  border: 2px solid var(--color-bg);
+}
+*::-webkit-scrollbar-thumb:hover { background: #34343b; }

@@ -1,0 +1,13 @@
+node_modules/
+.next/
+.env
+.env.local
+lib/generated/
+dev.log
+spike.log
+state.json
+shots/
+shots.js
+*.zip
+.vercel/
+tsconfig.tsbuildinfo

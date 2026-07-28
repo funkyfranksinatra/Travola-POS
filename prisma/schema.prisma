@@ -1,0 +1,150 @@
+// ═══════════════════════════════════════════════════════════════════
+// Travola POS — schema.prisma
+// Standalone build (freeze window). Same design rules as Travola-OS:
+// cuid ids, integer cents, snapshots-not-joins for anything printed,
+// restaurantId on every table (future multi-tenant + integration seam).
+// The client generates into lib/generated/prisma so the SHARED
+// node_modules (symlinked from the floor-app clone) is never touched.
+// ═══════════════════════════════════════════════════════════════════
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Catalog ─────────────────────────────────────────────────────────
+
+model MenuCategory {
+  id           String     @id @default(cuid())
+  restaurantId String
+  name         String
+  sortOrder    Int        @default(0)
+  active       Boolean    @default(true)
+  items        MenuItem[]
+
+  @@index([restaurantId])
+}
+
+model MenuItem {
+  id             String          @id @default(cuid())
+  restaurantId   String
+  categoryId     String
+  category       MenuCategory    @relation(fields: [categoryId], references: [id])
+  name           String
+  priceCents     Int // integer cents everywhere; never floats
+  station        String // "kitchen" | "bar" | custom Station.key
+  active         Boolean         @default(true) // false = 86'd
+  sortOrder      Int             @default(0)
+  modifierGroups ModifierGroup[]
+
+  @@index([restaurantId, categoryId])
+}
+
+model ModifierGroup {
+  id           String     @id @default(cuid())
+  restaurantId String
+  name         String // "Temperature", "Add-ons"
+  minSelect    Int        @default(0)
+  maxSelect    Int        @default(1)
+  modifiers    Modifier[]
+  items        MenuItem[]
+
+  @@index([restaurantId])
+}
+
+model Modifier {
+  id         String        @id @default(cuid())
+  groupId    String
+  group      ModifierGroup @relation(fields: [groupId], references: [id])
+  name       String // "Medium rare", "Add bacon"
+  priceCents Int           @default(0)
+  sortOrder  Int           @default(0)
+}
+
+// ─── Orders ──────────────────────────────────────────────────────────
+
+model Check {
+  id           String    @id @default(cuid())
+  restaurantId String
+  // Integration seam with the floor app (post-freeze): the party id.
+  // Standalone: null. tableLabel carries the human name ("12", "Bar 3").
+  partyKey     String?
+  tableLabel   String
+  serverName   String    @default("") // free-form until roster integration
+  status       String    @default("open") // open | closed | voided
+  openedAt     DateTime  @default(now())
+  closedAt     DateTime?
+  subtotalCents Int      @default(0)
+  taxCents      Int      @default(0)
+  tipCents      Int      @default(0)
+  totalCents    Int      @default(0)
+  guestCount    Int      @default(1)
+  currentCourse Int      @default(1)
+  items        CheckItem[]
+  payments     Payment[]
+
+  @@index([restaurantId, status])
+  @@index([restaurantId, openedAt])
+}
+
+model CheckItem {
+  id           String    @id @default(cuid())
+  checkId      String
+  check        Check     @relation(fields: [checkId], references: [id])
+  menuItemId   String
+  nameSnapshot String // name+price frozen at order time
+  priceCents   Int
+  quantity     Int       @default(1)
+  seat         Int?
+  course       Int       @default(1)
+  modifiers    Json // [{name, priceCents}] snapshot
+  station      String // resolved at send time from MenuItem.station
+  state        String    @default("held") // held | fired | bumped | voided
+  firedAt      DateTime?
+  bumpedAt     DateTime?
+  voidReason   String?
+
+  @@index([checkId])
+  @@index([station, state])
+}
+
+model Payment {
+  id                    String   @id @default(cuid())
+  restaurantId          String
+  checkId               String
+  check                 Check    @relation(fields: [checkId], references: [id])
+  method                String // cash | card | comp
+  amountCents           Int
+  tipCents              Int      @default(0)
+  // Phase 2 (Stripe) — populated later:
+  stripePaymentIntentId String?
+  status                String   @default("captured") // pending|captured|failed|refunded
+  createdAt             DateTime @default(now())
+
+  @@index([restaurantId, createdAt])
+}
+
+// ─── Stations & settings ─────────────────────────────────────────────
+
+model Station {
+  id           String  @id @default(cuid())
+  restaurantId String
+  key          String // "kitchen" | "bar" | custom
+  name         String
+  kind         String  @default("kds") // kds | printer (Phase 3)
+  printerToken String? @unique
+
+  @@unique([restaurantId, key])
+}
+
+model PosSettings {
+  id           String @id @default(cuid())
+  restaurantId String @unique
+  taxRateBps   Int    @default(840) // basis points: 840 = 8.40% (Winter Park, CO combined)
+  tipPresets   Json   @default("[18, 20, 25]")
+  receiptFooter String @default("")
+}
