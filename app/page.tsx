@@ -5,10 +5,10 @@ import { prisma, RESTAURANT_ID } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const stations = await prisma.station.findMany({
-    where: { restaurantId: RESTAURANT_ID },
-    orderBy: { key: "asc" },
-  });
+  // Render even if the DB isn't reachable yet (fresh deploy, cold env).
+  const stations = await prisma.station
+    .findMany({ where: { restaurantId: RESTAURANT_ID }, orderBy: { key: "asc" } })
+    .catch(() => []);
   return (
     <main className="flex-1 flex items-center justify-center p-8">
       <div className="w-full max-w-2xl">
