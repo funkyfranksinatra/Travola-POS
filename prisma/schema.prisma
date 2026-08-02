@@ -74,7 +74,9 @@ model Check {
   // Standalone: null. tableLabel carries the human name ("12", "Bar 3").
   partyKey     String?
   tableLabel   String
-  serverName   String    @default("") // free-form until roster integration
+  tableId      String?   // FloorTable.id when opened from the floor view
+  serverId     String?   // ServerUser.id (PIN login)
+  serverName   String    @default("") // display snapshot
   status       String    @default("open") // open | closed | voided
   openedAt     DateTime  @default(now())
   closedAt     DateTime?
@@ -126,6 +128,38 @@ model Payment {
   createdAt             DateTime @default(now())
 
   @@index([restaurantId, createdAt])
+}
+
+// ─── Staff & floor (standalone placeholders for the Travola seam) ────
+
+model ServerUser {
+  id           String @id @default(cuid())
+  restaurantId String
+  name         String
+  pin          String // 4-digit login PIN (pilot: plaintext; hash at multi-tenant)
+  color        String // hex — mirrors the server's assigned color in Travola
+  sortOrder    Int    @default(0)
+  tables       FloorTable[]
+
+  @@unique([restaurantId, pin])
+}
+
+// Static default floorplan until Travola integration ("give the word").
+// Post-freeze this table is replaced by the live Travola floor state.
+model FloorTable {
+  id           String  @id @default(cuid())
+  restaurantId String
+  label        String  // "14", "Bar 1–4"
+  x            Int     // percent-based geometry, 0-100
+  y            Int
+  w            Int     // percent width
+  h            Int     // percent height
+  shape        String  @default("rect") // rect | round
+  serverId     String? // assigned server (section)
+  server       ServerUser? @relation(fields: [serverId], references: [id])
+  state        String  @default("open") // open | sat | done
+
+  @@unique([restaurantId, label])
 }
 
 // ─── Stations & settings ─────────────────────────────────────────────

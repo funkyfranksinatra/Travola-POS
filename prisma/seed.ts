@@ -21,10 +21,47 @@ async function main() {
   await prisma.station.deleteMany({ where: { restaurantId: R } });
   await prisma.posSettings.deleteMany({ where: { restaurantId: R } });
 
+  await prisma.floorTable.deleteMany({ where: { restaurantId: R } });
+  await prisma.serverUser.deleteMany({ where: { restaurantId: R } });
+
   await prisma.station.createMany({
     data: [
       { restaurantId: R, key: "kitchen", name: "Kitchen" },
       { restaurantId: R, key: "bar", name: "Bar" },
+    ],
+  });
+
+  // ── Staff: two demo servers with PINs + Travola-style colors ──
+  const priya = await prisma.serverUser.create({
+    data: { restaurantId: R, name: "Priya", pin: "1111", color: "#818cf8", sortOrder: 0 },
+  });
+  const darko = await prisma.serverUser.create({
+    data: { restaurantId: R, name: "Darko", pin: "0000", color: "#e0b063", sortOrder: 1 },
+  });
+
+  // ── Default floorplan (placeholder until Travola integration) ──
+  // Section 1 (Priya): dining room north. Section 2 (Darko): rounds + south.
+  const T = (label: string, x: number, y: number, w: number, h: number,
+             serverId: string, shape = "rect") =>
+    ({ restaurantId: R, label, x, y, w, h, shape, serverId });
+  await prisma.floorTable.createMany({
+    data: [
+      T("11", 4, 8, 9, 11, priya.id),
+      T("12", 17, 8, 9, 11, priya.id),
+      T("14", 30, 8, 11, 13, priya.id),
+      T("15", 45, 8, 9, 11, priya.id),
+      T("Bar 1", 62, 6, 7, 8, priya.id),
+      T("Bar 2", 71, 6, 7, 8, priya.id),
+      T("Bar 3", 80, 6, 7, 8, priya.id),
+      T("Bar 4", 89, 6, 7, 8, priya.id),
+      T("21", 6, 38, 8, 14, darko.id, "round"),
+      T("22", 22, 44, 8, 14, darko.id, "round"),
+      T("23", 38, 40, 8, 14, darko.id, "round"),
+      T("24", 54, 44, 9, 11, darko.id),
+      T("31", 8, 74, 9, 11, darko.id),
+      T("32", 24, 76, 9, 11, darko.id),
+      T("33", 40, 76, 9, 11, darko.id),
+      T("41", 70, 60, 12, 20, priya.id),
     ],
   });
   await prisma.posSettings.create({

@@ -9,7 +9,10 @@ import { err, assertOpen, recomputeCheck } from "@/lib/pos-api";
 import { changeDueCents } from "@/lib/check-math";
 
 const Body = z.object({
-  method: z.enum(["cash", "comp"]),
+  // card_external: charged on the restaurant's existing card machine —
+  // the transition tender that lets paper-and-old-POS restaurants adopt
+  // Travola before Stripe onboarding. Stripe "card" lands in Phase 2.
+  method: z.enum(["cash", "comp", "card_external"]),
   tenderedCents: z.number().int().min(0).default(0), // cash only
   tipCents: z.number().int().min(0).default(0),
 });
@@ -50,7 +53,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     }
     amountCents = due - p.data.tipCents; // tip rides on the same payment row
   } else {
-    amountCents = due - p.data.tipCents; // comp settles the balance
+    // comp and card_external settle the balance in full
+    amountCents = due - p.data.tipCents;
   }
 
   await prisma.payment.create({
@@ -72,6 +76,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       data: { status: "closed", closedAt: new Date() },
     });
     closed = true;
+    // Floor seam: closing the check marks the table "done" (post-
+    // integration this notifies the Travola floor manager instead).
+    if (existing!.tableId) {
+      await prisma.floorTable.update({
+        where: { id: existing!.tableId },
+        data: { state: "done" },
+      });
+    }
   }
   return NextResponse.json({ ...settled, status: closed ? "closed" : "open", changeCents });
 }

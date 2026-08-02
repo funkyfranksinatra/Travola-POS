@@ -4,10 +4,11 @@ import { z } from "zod";
 import { prisma, RESTAURANT_ID } from "@/lib/prisma";
 import { err, assertOpen, recomputeCheck } from "@/lib/pos-api";
 
-const Body = z.object({
-  action: z.literal("void"),
-  reason: z.string().min(1),
-});
+const Body = z.union([
+  z.object({ action: z.literal("void"), reason: z.string().min(1) }),
+  // HOLD: push a still-held line back one course so SEND won't fire it.
+  z.object({ action: z.literal("hold") }),
+]);
 
 export async function POST(
   req: Request,
@@ -25,8 +26,17 @@ export async function POST(
 
   const item = await prisma.checkItem.findFirst({ where: { id: itemId, checkId: id } });
   if (!item) return err(404, "no such line");
-  if (item.state === "voided") return err(409, "already voided");
 
+  if (p.data.action === "hold") {
+    if (item.state !== "held") return err(409, "only held lines can be held back");
+    await prisma.checkItem.update({
+      where: { id: itemId },
+      data: { course: Math.min(9, item.course + 1) },
+    });
+    return NextResponse.json(await recomputeCheck(id));
+  }
+
+  if (item.state === "voided") return err(409, "already voided");
   await prisma.checkItem.update({
     where: { id: itemId },
     data: { state: "voided", voidReason: p.data.reason },
