@@ -23,6 +23,7 @@ async function main() {
 
   await prisma.floorTable.deleteMany({ where: { restaurantId: R } });
   await prisma.serverUser.deleteMany({ where: { restaurantId: R } });
+  await prisma.addOn.deleteMany({ where: { restaurantId: R } });
 
   await prisma.station.createMany({
     data: [
@@ -37,6 +38,9 @@ async function main() {
   });
   const darko = await prisma.serverUser.create({
     data: { restaurantId: R, name: "Darko", pin: "0000", color: "#e0b063", sortOrder: 1 },
+  });
+  await prisma.serverUser.create({
+    data: { restaurantId: R, name: "Manager", pin: "1412", color: "#52c794", role: "manager", sortOrder: 2 },
   });
 
   // ── Default floorplan (placeholder until Travola integration) ──
@@ -155,7 +159,18 @@ async function main() {
       });
     }
   }
-  console.log("seeded: 2 stations, 5 categories, 22 items, 4 modifier groups");
+  // Permanent (manager) add-on tags: a couple global + one dish-specific.
+  const salad = await prisma.menuItem.findFirst({ where: { restaurantId: R, name: "House Salad" } });
+  await prisma.addOn.createMany({
+    data: [
+      { restaurantId: R, name: "Gluten free", priceCents: 0, createdBy: "Manager" },
+      { restaurantId: R, name: "On the side", priceCents: 0, createdBy: "Manager" },
+      { restaurantId: R, name: "Extra sauce", priceCents: 100, createdBy: "Manager" },
+      { restaurantId: R, menuItemId: salad!.id, name: "Add chicken", priceCents: 600, createdBy: "Manager" },
+    ],
+  });
+
+  console.log("seeded: 3 staff (1111/0000/1412), 2 stations, 5 categories, 22 items, 4 modifier groups, 4 add-ons");
 }
 
 main().finally(() => prisma.$disconnect());

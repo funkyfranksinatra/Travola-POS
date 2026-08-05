@@ -10,6 +10,7 @@ import { api, ageMinutes } from "@/lib/ui";
 type KdsLine = {
   id: string; nameSnapshot: string; quantity: number; seat: number | null;
   course: number; modifiers: { name: string; priceCents: number }[];
+  note?: string;
 };
 type Ticket = {
   checkId: string; tableLabel: string; serverName: string; guestCount: number;
@@ -108,6 +109,11 @@ export default function Kds({ params }: { params: Promise<{ stationKey: string }
                           {l.modifiers.map((mm) => mm.name).join(" · ")}
                         </div>
                       )}
+                      {l.note ? (
+                        <div className="text-sm text-state-seated leading-tight font-medium">
+                          ★ {l.note}
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </div>

@@ -18,7 +18,7 @@ export async function GET(req: Request) {
     where: {
       restaurantId: RESTAURANT_ID,
       ...(status === "all" ? {} : { status }),
-      ...(mine ? { serverId: me.id } : {}),
+      ...(mine && me.role !== "manager" ? { serverId: me.id } : {}),
     },
     orderBy: { openedAt: "desc" },
     take: 100,
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
       where: { id: p.data.tableId, restaurantId: RESTAURANT_ID },
     });
     if (!table) return err(404, "no such table");
-    if (table.serverId !== me.id) return err(403, "not your section");
+    if (me.role !== "manager" && table.serverId !== me.id) return err(403, "not your section");
     const existing = await prisma.check.findFirst({
       where: { restaurantId: RESTAURANT_ID, tableId: table.id, status: "open" },
     });

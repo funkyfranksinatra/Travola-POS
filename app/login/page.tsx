@@ -60,6 +60,14 @@ export default function Login() {
             )
           )}
         </div>
+        {/* TEMPORARY dev escape hatch — remove before go-live. Lets the
+            dev reach the launcher (menu builder, KDS links) without a PIN. */}
+        <button
+          onClick={() => router.push("/")}
+          className="mt-8 text-xs text-ink-400 hover:text-ink-50 border border-dashed border-border rounded-lg px-3 py-1.5"
+        >
+          dev
+        </button>
       </div>
     </main>
   );

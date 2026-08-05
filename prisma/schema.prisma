@@ -39,6 +39,13 @@ model MenuItem {
   station        String // "kitchen" | "bar" | custom Station.key
   active         Boolean         @default(true) // false = 86'd
   sortOrder      Int             @default(0)
+  // Custom-tab items (chef/bartender specials or not-yet-entered dishes):
+  // created by any staff mid-shift, replicated to every terminal, and
+  // DECAYED at shift end. Permanent menu entry stays a manager act.
+  ephemeral      Boolean         @default(false)
+  expiresAt      DateTime?
+  description    String          @default("")
+  createdBy      String          @default("")
   modifierGroups ModifierGroup[]
 
   @@index([restaurantId, categoryId])
@@ -106,6 +113,7 @@ model CheckItem {
   modifiers    Json // [{name, priceCents}] snapshot
   station      String // resolved at send time from MenuItem.station
   state        String    @default("held") // held | fired | bumped | voided
+  note         String    @default("") // free-text to the kitchen/bar
   firedAt      DateTime?
   bumpedAt     DateTime?
   voidReason   String?
@@ -138,10 +146,31 @@ model ServerUser {
   name         String
   pin          String // 4-digit login PIN (pilot: plaintext; hash at multi-tenant)
   color        String // hex — mirrors the server's assigned color in Travola
+  role         String @default("server") // server | manager
   sortOrder    Int    @default(0)
   tables       FloorTable[]
 
   @@unique([restaurantId, pin])
+}
+
+// Add-on tags: upsell chips attachable to a line at order time.
+// Permanent ones are manager-created (expiresAt null). Server-created
+// ones DECAY at shift end (default shift 7:00–14:00 until Travola
+// integration provides real shift state) so a kitchen-rejected add-on
+// never haunts tomorrow's service. Selected add-ons are snapshotted
+// into CheckItem.modifiers — same money path as modifiers.
+model AddOn {
+  id           String    @id @default(cuid())
+  restaurantId String
+  menuItemId   String?   // null = global (offered on every dish)
+  name         String
+  priceCents   Int       @default(0)
+  ephemeral    Boolean   @default(false) // true = server-created, decays
+  expiresAt    DateTime? // set for ephemeral; filtered out after
+  createdBy    String    @default("") // ServerUser.name snapshot
+  createdAt    DateTime  @default(now())
+
+  @@index([restaurantId, menuItemId])
 }
 
 // Static default floorplan until Travola integration ("give the word").

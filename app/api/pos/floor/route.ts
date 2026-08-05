@@ -29,13 +29,13 @@ export async function GET() {
 
   const byTable = new Map(openChecks.filter((c) => c.tableId).map((c) => [c.tableId!, c]));
   return NextResponse.json({
-    me: { id: me.id, name: me.name, color: me.color },
+    me: { id: me.id, name: me.name, color: me.color, role: me.role },
     servers,
     tables: tables.map((t) => {
       const check = byTable.get(t.id);
       return {
         ...t,
-        mine: t.serverId === me.id,
+        mine: me.role === "manager" || t.serverId === me.id,
         check: check
           ? {
               id: check.id,

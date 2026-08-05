@@ -19,7 +19,7 @@ export async function POST(req: Request) {
   });
   if (!server) return err(401, "wrong PIN");
   (await cookies()).set(COOKIE, server.id, { httpOnly: true, sameSite: "lax", path: "/" });
-  return NextResponse.json({ id: server.id, name: server.name, color: server.color });
+  return NextResponse.json({ id: server.id, name: server.name, color: server.color, role: server.role });
 }
 
 export async function GET() {
@@ -29,7 +29,7 @@ export async function GET() {
     where: { id, restaurantId: RESTAURANT_ID },
   });
   if (!server) return err(401, "not logged in");
-  return NextResponse.json({ id: server.id, name: server.name, color: server.color });
+  return NextResponse.json({ id: server.id, name: server.name, color: server.color, role: server.role });
 }
 
 export async function DELETE() {
