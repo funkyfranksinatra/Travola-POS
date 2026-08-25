@@ -36,7 +36,7 @@ export async function POST(req: Request) {
       name: p.data.name,
       priceCents: p.data.priceCents,
       ephemeral,
-      expiresAt: ephemeral ? nextShiftClose() : null,
+      expiresAt: ephemeral ? await nextShiftClose() : null,
       createdBy: me.name,
     },
   });

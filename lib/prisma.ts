@@ -1,6 +1,8 @@
 // lib/prisma.ts — the one PrismaClient for the POS app.
-// Prisma 7 driver-adapter pattern (same as the floor app); client is
-// generated into lib/generated/prisma so shared node_modules stays clean.
+// SHARED-DB build: DATABASE_URL points at the SAME Neon database as
+// Travola-OS. The client still generates into lib/generated/prisma and
+// mirrors only the tables the POS touches (see prisma/schema.prisma —
+// this repo never migrates).
 import { PrismaClient } from "./generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
 
@@ -17,6 +19,15 @@ if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prismaPos = prisma;
 }
 
-// Single-restaurant standalone build; every query still scopes by this
-// so the multi-tenant + floor-app integration is a constant swap.
-export const RESTAURANT_ID = "rest_demo";
+// The restaurant this POS deployment serves. One deployment = one
+// restaurant at pilot scale; POS_RESTAURANT_ID is the Restaurant.id
+// from the shared database (Vercel env / .env). The rest_demo fallback
+// keeps local sandboxes bootable against a scratch database.
+export const RESTAURANT_ID = process.env.POS_RESTAURANT_ID ?? "rest_demo";
+
+if (process.env.NODE_ENV === "production" && !process.env.POS_RESTAURANT_ID) {
+  console.warn(
+    "[pos] POS_RESTAURANT_ID is not set — running against the rest_demo " +
+      "tenant. Set it to the shared database's Restaurant.id."
+  );
+}

@@ -1,15 +1,41 @@
-// lib/shift.ts — placeholder shift clock.
-// TRAVOLA SEAM: the POS has no real notion of service periods yet.
-// Until Neon/Travola integration provides live shift state, assume a
-// breakfast/lunch house: open 07:00, close 14:00 local. Everything
-// ephemeral (server-created add-ons, custom-tab items) expires at the
-// NEXT shift close, so a mid-shift creation dies at 14:00 today and a
-// late-night test creation dies at 14:00 tomorrow.
+// lib/shift.ts — service-day clock.
+// SHARED-DB build: the real service hours live in the floor app's
+// RestaurantSettings (openMinutes/closeMinutes). Ephemeral things
+// (server-created add-ons, custom-tab items) expire at the NEXT
+// service-reset boundary — the same tick the floor app uses to wipe
+// live table state (close + 90min, or open − 60min, or 4:00 AM when
+// hours are unset), so "decays at shift end" now means the REAL shift.
+import { prisma, RESTAURANT_ID } from "./prisma";
+
+// Fallbacks when the settings row is missing (scratch databases).
 export const SHIFT_OPEN_HOUR = 7;
 export const SHIFT_CLOSE_HOUR = 14;
 
-/** The next occurrence of shift close (14:00 local server time). */
-export function nextShiftClose(now: Date = new Date()): Date {
+/** Mirror of the floor app's latestServiceResetBoundary, projected
+ *  FORWARD: the next reset tick after `now`. */
+function nextResetTick(now: Date, openMinutes: number | null, closeMinutes: number | null): Date {
+  let resetMin: number;
+  if (closeMinutes == null) {
+    resetMin = openMinutes == null ? 4 * 60 : (openMinutes - 60 + 1440) % 1440;
+  } else {
+    const overnight = openMinutes != null && closeMinutes <= openMinutes;
+    resetMin = ((closeMinutes + (overnight ? 1440 : 0)) + 90) % 1440;
+  }
+  const tick = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(resetMin / 60), resetMin % 60);
+  if (tick.getTime() <= now.getTime()) tick.setDate(tick.getDate() + 1);
+  return tick;
+}
+
+/** The next shift-end boundary — reads the shared settings; falls back
+ *  to the legacy 14:00 close on scratch databases. */
+export async function nextShiftClose(now: Date = new Date()): Promise<Date> {
+  try {
+    const settings = await prisma.restaurantSettings.findUnique({
+      where: { restaurantId: RESTAURANT_ID },
+      select: { openMinutes: true, closeMinutes: true },
+    });
+    if (settings) return nextResetTick(now, settings.openMinutes, settings.closeMinutes);
+  } catch { /* fall through to legacy clock */ }
   const close = new Date(now);
   close.setHours(SHIFT_CLOSE_HOUR, 0, 0, 0);
   if (close <= now) close.setDate(close.getDate() + 1);

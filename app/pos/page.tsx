@@ -41,11 +41,12 @@ type CheckFull = {
   changeCents?: number;
 };
 type FloorTable = {
-  id: string; label: string; x: number; y: number; w: number; h: number;
-  shape: string; serverId: string | null; state: string; mine: boolean;
+  id: string; label: string; floorId: string; x: number; y: number; w: number; h: number;
+  shape: string; capacity: number; serverId: string | null; state: string; mine: boolean;
+  party: string | null; partySize: number | null; seatedAt: string | null;
   check: { id: string; totalCents: number; guestCount: number; openedAt: string; itemCount: number } | null;
 };
-type FloorPayload = { me: Me; servers: Me[]; tables: FloorTable[] };
+type FloorPayload = { me: Me; servers: { id: string; name: string; color: string; role: string }[]; floors: { id: string; name: string }[]; tables: FloorTable[] };
 
 const CAT_COLORS = ["var(--color-state-avail)", "var(--color-ai)", "var(--color-state-dining)", "var(--color-state-reserved)", "var(--color-state-seated)"];
 const CUSTOM_COLOR = "var(--color-state-reserved)";
@@ -58,6 +59,7 @@ export default function PosTerminal() {
   const [tab, setTab] = useState<"checks" | "floor">("floor");
   const [checks, setChecks] = useState<CheckFull[]>([]);
   const [floor, setFloor] = useState<FloorPayload | null>(null);
+  const [floorId, setFloorId] = useState<string | null>(null); // live Travola floor tab
   const [check, setCheck] = useState<CheckFull | null>(null); // null = home
   const [catId, setCatId] = useState<string | null>(null);
   const [selLine, setSelLine] = useState<string | null>(null);
@@ -98,6 +100,7 @@ export default function PosTerminal() {
         api<FloorPayload>("/api/pos/floor"),
       ]);
       setChecks(c); setFloor(f);
+      setFloorId((cur) => cur ?? f.floors?.[0]?.id ?? null);
     } catch {}
   }, []);
   useEffect(() => {
@@ -123,7 +126,7 @@ export default function PosTerminal() {
   const openTable = (t: FloorTable) => {
     if (!t.mine) return;
     if (t.check) run(() => api<CheckFull>(`/api/pos/checks/${t.check!.id}`));
-    else setSeatTable(t);
+    else setSeatTable(t); // host-seated party prefills guests from partySize
   };
   const createCheck = (t: FloorTable, guests: number) =>
     run(async () => {
@@ -239,10 +242,20 @@ export default function PosTerminal() {
 
         {tab === "floor" && floor && (
           <div className="flex-1 relative m-4 rounded-2xl border border-border bg-panel overflow-hidden">
-            {floor.tables.map((t) => {
+            {(floor.floors?.length ?? 0) > 1 && (
+              <div className="absolute top-3 left-4 z-10 flex gap-2">
+                {floor.floors.map((f) => (
+                  <button key={f.id} onClick={() => setFloorId(f.id)}
+                    className={`rounded-lg px-3 py-1 text-[12px] font-medium border ${floorId === f.id ? "bg-ai/15 text-ai border-ai/50" : "bg-panel-card text-ink-400 border-border hover:border-border-hi"}`}>
+                    {f.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {floor.tables.filter((t) => floorId == null || t.floorId === floorId).map((t) => {
               const owner = floor.servers.find((s) => s.id === t.serverId);
               const accent = me.role === "manager" ? owner?.color ?? me.color : me.color;
-              const sat = !!t.check;
+              const sat = t.state === "sat" || !!t.check;
               const done = t.state === "done" && !t.check;
               const base: React.CSSProperties = {
                 left: `${t.x}%`, top: `${t.y}%`, width: `${t.w}%`, height: `${t.h}%`,
@@ -260,7 +273,8 @@ export default function PosTerminal() {
                   className="absolute flex flex-col items-center justify-center gap-0.5" style={style}>
                   <span className="font-bold text-ink-50 text-[15px]">{t.label}</span>
                   <span className="text-[11px]" style={{ color: t.mine ? (sat ? accent : done ? "var(--color-state-avail)" : "var(--color-ink-400)") : "var(--color-ink-400)" }}>
-                    {sat ? `${usd(t.check!.totalCents)} · ${t.check!.guestCount} · ${ageMinutes(t.check!.openedAt)}m`
+                    {t.check ? `${usd(t.check.totalCents)} · ${t.check.guestCount} · ${ageMinutes(t.check.openedAt)}m`
+                      : sat ? `${t.party ?? "seated"}${t.partySize ? ` · ${t.partySize}` : ""}${t.seatedAt ? ` · ${ageMinutes(t.seatedAt)}m` : ""}`
                       : done ? "done" : "—"}
                   </span>
                 </button>
@@ -857,7 +871,7 @@ function SeatDialog({ table, color, onClose, onSeat }: {
   table: FloorTable; color: string; onClose: () => void;
   onSeat: (t: FloorTable, guests: number) => void;
 }) {
-  const [guests, setGuests] = useState(2);
+  const [guests, setGuests] = useState(table.partySize ?? 2);
   return (
     <Overlay onClose={onClose}>
       <h2 className="text-lg font-semibold text-ink-50 mb-1">

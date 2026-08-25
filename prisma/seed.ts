@@ -1,5 +1,11 @@
-// prisma/seed.ts — Volario's-style demo menu.
+// prisma/seed.ts — Volario's-style demo MENU (menu, stations, settings).
 // Run: node --experimental-strip-types prisma/seed.ts
+//
+// SHARED-DB build: staff and floor live in the Travola-OS tables and
+// are NEVER seeded from here — the floor app owns them. Set
+// POS_RESTAURANT_ID to seed the menu into a real restaurant tenant
+// (default rest_demo for scratch databases). Server PINs are set on the
+// shared Server table (see the OS repo's scripts or SQL).
 import "dotenv/config";
 import { PrismaClient } from "../lib/generated/prisma/index.js";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -7,7 +13,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
 });
-const R = "rest_demo";
+const R = process.env.POS_RESTAURANT_ID ?? "rest_demo";
 
 async function main() {
   // idempotent: wipe demo tenant first (order matters for FKs)
@@ -21,8 +27,6 @@ async function main() {
   await prisma.station.deleteMany({ where: { restaurantId: R } });
   await prisma.posSettings.deleteMany({ where: { restaurantId: R } });
 
-  await prisma.floorTable.deleteMany({ where: { restaurantId: R } });
-  await prisma.serverUser.deleteMany({ where: { restaurantId: R } });
   await prisma.addOn.deleteMany({ where: { restaurantId: R } });
 
   await prisma.station.createMany({
@@ -32,42 +36,9 @@ async function main() {
     ],
   });
 
-  // ── Staff: two demo servers with PINs + Travola-style colors ──
-  const priya = await prisma.serverUser.create({
-    data: { restaurantId: R, name: "Priya", pin: "1111", color: "#818cf8", sortOrder: 0 },
-  });
-  const darko = await prisma.serverUser.create({
-    data: { restaurantId: R, name: "Darko", pin: "0000", color: "#e0b063", sortOrder: 1 },
-  });
-  await prisma.serverUser.create({
-    data: { restaurantId: R, name: "Manager", pin: "1412", color: "#52c794", role: "manager", sortOrder: 2 },
-  });
+  // Staff + floorplan: OWNED BY THE FLOOR APP (shared DB). Nothing to
+  // seed here — log in with a Server PIN set in Travola-OS.
 
-  // ── Default floorplan (placeholder until Travola integration) ──
-  // Section 1 (Priya): dining room north. Section 2 (Darko): rounds + south.
-  const T = (label: string, x: number, y: number, w: number, h: number,
-             serverId: string, shape = "rect") =>
-    ({ restaurantId: R, label, x, y, w, h, shape, serverId });
-  await prisma.floorTable.createMany({
-    data: [
-      T("11", 4, 8, 9, 11, priya.id),
-      T("12", 17, 8, 9, 11, priya.id),
-      T("14", 30, 8, 11, 13, priya.id),
-      T("15", 45, 8, 9, 11, priya.id),
-      T("Bar 1", 62, 6, 7, 8, priya.id),
-      T("Bar 2", 71, 6, 7, 8, priya.id),
-      T("Bar 3", 80, 6, 7, 8, priya.id),
-      T("Bar 4", 89, 6, 7, 8, priya.id),
-      T("21", 6, 38, 8, 14, darko.id, "round"),
-      T("22", 22, 44, 8, 14, darko.id, "round"),
-      T("23", 38, 40, 8, 14, darko.id, "round"),
-      T("24", 54, 44, 9, 11, darko.id),
-      T("31", 8, 74, 9, 11, darko.id),
-      T("32", 24, 76, 9, 11, darko.id),
-      T("33", 40, 76, 9, 11, darko.id),
-      T("41", 70, 60, 12, 20, priya.id),
-    ],
-  });
   await prisma.posSettings.create({
     data: { restaurantId: R, taxRateBps: 840, tipPresets: [18, 20, 25] },
   });
@@ -170,7 +141,7 @@ async function main() {
     ],
   });
 
-  console.log("seeded: 3 staff (1111/0000/1412), 2 stations, 5 categories, 22 items, 4 modifier groups, 4 add-ons");
+  console.log("seeded: menu into tenant " + R + " — staff/floor live in Travola-OS (shared DB)");
 }
 
 main().finally(() => prisma.$disconnect());

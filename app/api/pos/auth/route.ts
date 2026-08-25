@@ -1,12 +1,14 @@
 // POST /api/pos/auth {pin} — PIN login; sets the server cookie.
 // GET  — who am I. DELETE — log out.
-// Pilot-grade auth: cookie carries the ServerUser id; PINs are seeded
-// (1111 Priya / 0000 Darko). Hashing + rate limits land with multi-tenant.
+// SHARED-DB build: PINs live on the floor app's Server table (the
+// `pin` column the shared migration added). Pilot-grade: plaintext
+// PINs, cookie carries the id; hashing + rate limits land with
+// multi-tenant hardening.
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { z } from "zod";
-import { prisma, RESTAURANT_ID } from "@/lib/prisma";
 import { err } from "@/lib/pos-api";
+import { currentServer, serverByPin } from "@/lib/auth";
 
 const COOKIE = "pos_server";
 
@@ -14,22 +16,16 @@ export async function POST(req: Request) {
   const p = z.object({ pin: z.string().regex(/^\d{4}$/) })
     .safeParse(await req.json().catch(() => null));
   if (!p.success) return err(400, "PIN must be 4 digits");
-  const server = await prisma.serverUser.findUnique({
-    where: { restaurantId_pin: { restaurantId: RESTAURANT_ID, pin: p.data.pin } },
-  });
+  const server = await serverByPin(p.data.pin);
   if (!server) return err(401, "wrong PIN");
   (await cookies()).set(COOKIE, server.id, { httpOnly: true, sameSite: "lax", path: "/" });
-  return NextResponse.json({ id: server.id, name: server.name, color: server.color, role: server.role });
+  return NextResponse.json(server);
 }
 
 export async function GET() {
-  const id = (await cookies()).get(COOKIE)?.value;
-  if (!id) return err(401, "not logged in");
-  const server = await prisma.serverUser.findFirst({
-    where: { id, restaurantId: RESTAURANT_ID },
-  });
+  const server = await currentServer();
   if (!server) return err(401, "not logged in");
-  return NextResponse.json({ id: server.id, name: server.name, color: server.color, role: server.role });
+  return NextResponse.json(server);
 }
 
 export async function DELETE() {

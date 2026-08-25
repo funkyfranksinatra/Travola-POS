@@ -7,16 +7,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma, RESTAURANT_ID } from "@/lib/prisma";
 import { err } from "@/lib/pos-api";
-import { currentServer } from "@/lib/auth";
+import { currentServer, serverByPin } from "@/lib/auth";
 
 async function managerOk(pin?: string) {
   const me = await currentServer();
   if (me?.role === "manager") return true;
   if (!pin) return false;
-  const mgr = await prisma.serverUser.findFirst({
-    where: { restaurantId: RESTAURANT_ID, pin, role: "manager" },
-  });
-  return !!mgr;
+  const mgr = await serverByPin(pin);
+  return mgr?.role === "manager";
 }
 
 export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {

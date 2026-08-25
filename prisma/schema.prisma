@@ -1,10 +1,22 @@
 // ═══════════════════════════════════════════════════════════════════
-// Travola POS — schema.prisma
-// Standalone build (freeze window). Same design rules as Travola-OS:
-// cuid ids, integer cents, snapshots-not-joins for anything printed,
-// restaurantId on every table (future multi-tenant + integration seam).
-// The client generates into lib/generated/prisma so the SHARED
-// node_modules (symlinked from the floor-app clone) is never touched.
+// Travola POS — schema.prisma  (SHARED-DB build)
+//
+// The POS and Travola-OS point at the SAME Postgres database (Neon).
+// This schema mirrors exactly the tables the POS touches:
+//   · POS-owned:  Menu*, Check*, Payment, Station, AddOn, PosSettings
+//   · Shared:     Server, Table, Floor, RestaurantSettings (floor app
+//                 is the source of truth; POS reads + updates live
+//                 state only), ServiceEvent, TableSession (the OS↔POS
+//                 communication + analytics layer)
+//
+// ⚠ MIGRATION OWNERSHIP: the Travola-OS repo owns ALL migrations for
+// this database. NEVER run `prisma migrate` or `prisma db push` from
+// this repo — db push would try to reconcile the whole database to
+// this partial mirror and DROP the floor app's tables. This repo runs
+// `prisma generate` only.
+//
+// Same design rules as ever: cuid ids, integer cents, snapshots-not-
+// joins for anything printed, restaurantId scoping on every query.
 // ═══════════════════════════════════════════════════════════════════
 
 generator client {
@@ -16,7 +28,139 @@ datasource db {
   provider = "postgresql"
 }
 
-// ─── Catalog ─────────────────────────────────────────────────────────
+// ─── Shared: staff & floor (Travola-OS is the source of truth) ───────
+
+/// The floor app's staff table. POS reads it for PIN login and section
+/// ownership; `pin` is the one column the shared-DB migration added
+/// for the POS. POS never creates or deletes servers.
+model Server {
+  id         String    @id @default(cuid())
+  name       String
+  colorHex   String?
+  roles      String[]
+  onShift    Boolean   @default(false)
+  aiExcluded Boolean   @default(false)
+  pin        String?
+  active     Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  restaurantId String
+
+  @@unique([restaurantId, pin])
+  @@index([restaurantId, active])
+}
+
+/// The floor app's table — layout + live per-service state. POS reads
+/// geometry and state for its floor view, and updates ONLY the live
+/// state (seating a walk-in from the POS), never layout.
+model Table {
+  id               String    @id @default(cuid())
+  name             String
+  capacity         Int
+  shape            String    @default("square")
+  area             String    @default("dining")
+  floorId          String    @default("f1")
+  x                Int       @default(0)
+  y                Int       @default(0)
+  rotation         Int       @default(0)
+  manualOnly       Boolean   @default(false)
+  onlineExcluded   Boolean   @default(false)
+  active           Boolean   @default(true)
+  status           String    @default("available")
+  party            String?
+  partySize        Int?
+  seatedAt         DateTime?
+  groupId          String?
+  assignedServerId String?
+  liveUpdatedAt    DateTime?
+  restaurantId     String
+
+  @@index([restaurantId, active, floorId])
+}
+
+model Floor {
+  id           String  @id
+  name         String
+  isManualOnly Boolean @default(false)
+  onlineExcluded Boolean @default(false)
+  sortOrder    Int     @default(0)
+  active       Boolean @default(true)
+  restaurantId String
+
+  @@index([restaurantId])
+}
+
+/// Floor app settings — POS reads service hours so shift-scoped decay
+/// (ephemeral add-ons/custom items) follows the REAL service day.
+model RestaurantSettings {
+  id           String   @id @default("main")
+  openMinutes  Int?
+  closeMinutes Int?
+  roles        String[] @default(["waiter", "bartender"])
+  prefs        Json?
+  updatedAt    DateTime @updatedAt
+  restaurantId String   @unique
+}
+
+// ─── Shared: the OS ↔ POS communication layer ────────────────────────
+
+/// Append-only event bus both apps write and tail (3–5s poll). See the
+/// Travola-OS schema for the full type catalog.
+model ServiceEvent {
+  id           String   @id @default(cuid())
+  seq          BigInt   @unique @default(autoincrement())
+  restaurantId String
+  source       String
+  type         String
+  partyKey     String?
+  tableIds     String[]
+  serverId     String?
+  checkId      String?
+  serviceDate  DateTime @db.Date
+  payload      Json?
+  createdAt    DateTime @default(now())
+
+  @@index([restaurantId, seq])
+  @@index([restaurantId, serviceDate, type])
+}
+
+/// One seated party, seat → clear — the analytics row shift
+/// intelligence trains on. Floor writes the seating spine; POS writes
+/// the money and course pacing.
+model TableSession {
+  id                 String    @id @default(cuid())
+  restaurantId       String
+  serviceDate        DateTime  @db.Date
+  partyKey           String?
+  partyName          String?
+  tableIds           String[]
+  primaryTableId     String
+  serverId           String?
+  guestCount         Int?
+  seatedAt           DateTime
+  firstOrderAt       DateTime?
+  lastFireAt         DateTime?
+  lastBumpAt         DateTime?
+  checkPaidAt        DateTime?
+  clearedAt          DateTime?
+  turnMinutes        Int?
+  paidToClearMinutes Int?
+  checkId            String?
+  subtotalCents      Int?
+  totalCents         Int?
+  tipCents           Int?
+  ppaCents           Int?
+  courseTimings      Json?
+  moves              Json?
+  origin             String    @default("floor")
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([restaurantId, serviceDate])
+  @@index([restaurantId, primaryTableId, clearedAt])
+  @@index([restaurantId, checkId])
+}
+
+// ─── POS-owned: catalog ──────────────────────────────────────────────
 
 model MenuCategory {
   id           String     @id @default(cuid())
@@ -72,17 +216,17 @@ model Modifier {
   sortOrder  Int           @default(0)
 }
 
-// ─── Orders ──────────────────────────────────────────────────────────
+// ─── POS-owned: orders ───────────────────────────────────────────────
 
 model Check {
   id           String    @id @default(cuid())
   restaurantId String
-  // Integration seam with the floor app (post-freeze): the party id.
-  // Standalone: null. tableLabel carries the human name ("12", "Bar 3").
+  // The party seam, now LIVE: reservation/waitlist id from the shared
+  // floor state. tableLabel carries the human name ("12", "Bar 3").
   partyKey     String?
   tableLabel   String
-  tableId      String?   // FloorTable.id when opened from the floor view
-  serverId     String?   // ServerUser.id (PIN login)
+  tableId      String?   // shared Table.id when opened from the floor view
+  serverId     String?   // shared Server.id (PIN login)
   serverName   String    @default("") // display snapshot
   status       String    @default("open") // open | closed | voided
   openedAt     DateTime  @default(now())
@@ -98,6 +242,7 @@ model Check {
 
   @@index([restaurantId, status])
   @@index([restaurantId, openedAt])
+  @@index([restaurantId, tableId, status])
 }
 
 model CheckItem {
@@ -127,7 +272,7 @@ model Payment {
   restaurantId          String
   checkId               String
   check                 Check    @relation(fields: [checkId], references: [id])
-  method                String // cash | card | comp
+  method                String // cash | card | comp | card_external
   amountCents           Int
   tipCents              Int      @default(0)
   // Phase 2 (Stripe) — populated later:
@@ -138,27 +283,13 @@ model Payment {
   @@index([restaurantId, createdAt])
 }
 
-// ─── Staff & floor (standalone placeholders for the Travola seam) ────
-
-model ServerUser {
-  id           String @id @default(cuid())
-  restaurantId String
-  name         String
-  pin          String // 4-digit login PIN (pilot: plaintext; hash at multi-tenant)
-  color        String // hex — mirrors the server's assigned color in Travola
-  role         String @default("server") // server | manager
-  sortOrder    Int    @default(0)
-  tables       FloorTable[]
-
-  @@unique([restaurantId, pin])
-}
+// ─── POS-owned: add-ons, stations, settings ──────────────────────────
 
 // Add-on tags: upsell chips attachable to a line at order time.
 // Permanent ones are manager-created (expiresAt null). Server-created
-// ones DECAY at shift end (default shift 7:00–14:00 until Travola
-// integration provides real shift state) so a kitchen-rejected add-on
-// never haunts tomorrow's service. Selected add-ons are snapshotted
-// into CheckItem.modifiers — same money path as modifiers.
+// ones DECAY at shift end so a kitchen-rejected add-on never haunts
+// tomorrow's service. Selected add-ons are snapshotted into
+// CheckItem.modifiers — same money path as modifiers.
 model AddOn {
   id           String    @id @default(cuid())
   restaurantId String
@@ -167,31 +298,11 @@ model AddOn {
   priceCents   Int       @default(0)
   ephemeral    Boolean   @default(false) // true = server-created, decays
   expiresAt    DateTime? // set for ephemeral; filtered out after
-  createdBy    String    @default("") // ServerUser.name snapshot
+  createdBy    String    @default("") // Server.name snapshot
   createdAt    DateTime  @default(now())
 
   @@index([restaurantId, menuItemId])
 }
-
-// Static default floorplan until Travola integration ("give the word").
-// Post-freeze this table is replaced by the live Travola floor state.
-model FloorTable {
-  id           String  @id @default(cuid())
-  restaurantId String
-  label        String  // "14", "Bar 1–4"
-  x            Int     // percent-based geometry, 0-100
-  y            Int
-  w            Int     // percent width
-  h            Int     // percent height
-  shape        String  @default("rect") // rect | round
-  serverId     String? // assigned server (section)
-  server       ServerUser? @relation(fields: [serverId], references: [id])
-  state        String  @default("open") // open | sat | done
-
-  @@unique([restaurantId, label])
-}
-
-// ─── Stations & settings ─────────────────────────────────────────────
 
 model Station {
   id           String  @id @default(cuid())
@@ -207,7 +318,7 @@ model Station {
 model PosSettings {
   id           String @id @default(cuid())
   restaurantId String @unique
-  taxRateBps   Int    @default(840) // basis points: 840 = 8.40% (Winter Park, CO combined)
+  taxRateBps   Int    @default(840) // basis points: 840 = 8.40%
   tipPresets   Json   @default("[18, 20, 25]")
   receiptFooter String @default("")
 }

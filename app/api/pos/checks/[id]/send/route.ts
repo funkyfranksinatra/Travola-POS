@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import { prisma, RESTAURANT_ID } from "@/lib/prisma";
 import { err, assertOpen, recomputeCheck } from "@/lib/pos-api";
+import { emitServiceEvents, recordFire } from "@/lib/service-events";
 
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -17,6 +18,19 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     where: { checkId: id, state: "held", course: { lte: check!.currentCourse } },
     data: { state: "fired", firedAt: new Date() },
   });
+  if (count > 0) {
+    // Shared-DB link: pacing onto the session + the event bus (the
+    // floor's sentry reads "entrées fired Xm ago" from this).
+    await recordFire(id, check!.currentCourse, count);
+    await emitServiceEvents([{
+      type: "COURSE_FIRED",
+      partyKey: check!.partyKey,
+      tableIds: check!.tableId ? [check!.tableId] : [],
+      serverId: check!.serverId,
+      checkId: id,
+      payload: { course: check!.currentCourse, items: count, tableLabel: check!.tableLabel },
+    }]);
+  }
   const payload = await recomputeCheck(id);
   return NextResponse.json({ ...payload, firedCount: count });
 }

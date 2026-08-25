@@ -41,7 +41,7 @@ export async function POST(req: Request) {
       priceCents: p.data.priceCents,
       station: p.data.kind === "drink" ? "bar" : "kitchen",
       ephemeral: true,
-      expiresAt: nextShiftClose(),
+      expiresAt: await nextShiftClose(),
       description: p.data.description,
       createdBy: me.name,
     },

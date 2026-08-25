@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma, RESTAURANT_ID } from "@/lib/prisma";
 import { err, assertOpen, recomputeCheck } from "@/lib/pos-api";
+import { emitServiceEvents, recordFire } from "@/lib/service-events";
 
 const Body = z.object({ course: z.number().int().min(1).max(9) });
 
@@ -28,6 +29,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     where: { checkId: id, state: "held", course: { lte: p.data.course } },
     data: { state: "fired", firedAt: new Date() },
   });
+  if (count > 0) {
+    await recordFire(id, p.data.course, count);
+    await emitServiceEvents([{
+      type: "COURSE_FIRED",
+      partyKey: check!.partyKey,
+      tableIds: check!.tableId ? [check!.tableId] : [],
+      serverId: check!.serverId,
+      checkId: id,
+      payload: { course: p.data.course, items: count, tableLabel: check!.tableLabel },
+    }]);
+  }
   const payload = await recomputeCheck(id);
   return NextResponse.json({ ...payload, firedCount: count });
 }

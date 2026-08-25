@@ -2,9 +2,10 @@
 
 Point-of-sale for restaurants, built on the Travola platform stack:
 order terminal, kitchen display screens, menu management, and
-server-authoritative check math. Standalone today; integrates with
-[Travola](https://gettravola.com) floor management + Shift Intelligence
-as one unified system.
+server-authoritative check math. Runs on the same database as
+[Travola](https://gettravola.com) floor management — live floor state,
+PIN logins, and the Shift Intelligence layer are shared, one unified
+system.
 
 ## Screens
 
@@ -38,11 +39,18 @@ Phase 2.
 ## Run
 
 ```bash
-cp .env.example .env       # point DATABASE_URL at Postgres
+cp .env.example .env       # DATABASE_URL = the SHARED Travola Neon DB
+                           # POS_RESTAURANT_ID = the Restaurant.id to serve
 npm install
-npx prisma db push         # create tables
+npx prisma generate        # client only — NEVER migrate/db push from here
 node --experimental-strip-types prisma/seed.ts   # demo menu (optional)
 npm run dev
 ```
+
+**Shared database:** the POS and Travola-OS point at the same Postgres
+database. The Travola-OS repo owns every migration; this repo only runs
+`prisma generate`. Staff (PIN logins) and the floorplan live in the
+floor app's tables. The two apps talk through the append-only
+`ServiceEvent` bus and enrich the same `TableSession` analytics rows.
 
 `npm test` runs the check-math unit suite.

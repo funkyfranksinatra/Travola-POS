@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma, RESTAURANT_ID } from "@/lib/prisma";
 import { err } from "@/lib/pos-api";
+import { emitServiceEvents, recordBump } from "@/lib/service-events";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ stationKey: string }> }) {
   const { stationKey } = await ctx.params;
@@ -54,10 +55,34 @@ export async function POST(req: Request, ctx: { params: Promise<{ stationKey: st
     "checkId" in p.data
       ? { checkId: p.data.checkId, station: stationKey, state: "fired" }
       : { id: p.data.itemId, station: stationKey, state: "fired" };
+  // Resolve the check id + course before the flip so the bus event can
+  // carry pacing context (bump-by-itemId only has the item id in hand).
+  const target = await prisma.checkItem.findFirst({
+    where,
+    select: { checkId: true, course: true, firedAt: true, check: { select: { restaurantId: true, partyKey: true, tableId: true, tableLabel: true, serverId: true } } },
+  });
+  if (!target || target.check.restaurantId !== RESTAURANT_ID) return err(404, "nothing to bump");
   const { count } = await prisma.checkItem.updateMany({
     where,
     data: { state: "bumped", bumpedAt: new Date() },
   });
   if (!count) return err(404, "nothing to bump");
+  // Shared-DB link: course pacing to the session + the bus ("entrées
+  // bumped 4m ago" is the sentry's favorite fact).
+  await recordBump(target.checkId);
+  await emitServiceEvents([{
+    type: "COURSE_BUMPED",
+    partyKey: target.check.partyKey,
+    tableIds: target.check.tableId ? [target.check.tableId] : [],
+    serverId: target.check.serverId,
+    checkId: target.checkId,
+    payload: {
+      station: stationKey,
+      course: target.course,
+      items: count,
+      tableLabel: target.check.tableLabel,
+      minutesSinceFire: target.firedAt ? Math.round((Date.now() - target.firedAt.getTime()) / 60000) : null,
+    },
+  }]);
   return NextResponse.json({ bumped: count });
 }

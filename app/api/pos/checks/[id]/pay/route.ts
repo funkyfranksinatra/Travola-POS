@@ -7,6 +7,7 @@ import { z } from "zod";
 import { prisma, RESTAURANT_ID } from "@/lib/prisma";
 import { err, assertOpen, recomputeCheck } from "@/lib/pos-api";
 import { changeDueCents } from "@/lib/check-math";
+import { emitServiceEvents, recordPaid } from "@/lib/service-events";
 
 const Body = z.object({
   // card_external: charged on the restaurant's existing card machine —
@@ -76,14 +77,43 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       data: { status: "closed", closedAt: new Date() },
     });
     closed = true;
-    // Floor seam: closing the check marks the table "done" (post-
-    // integration this notifies the Travola floor manager instead).
-    if (existing!.tableId) {
-      await prisma.floorTable.update({
-        where: { id: existing!.tableId },
-        data: { state: "done" },
-      });
-    }
+    // Shared-DB link: money + paid-time onto the party's TableSession,
+    // CHECK_PAID/CHECK_CLOSED onto the bus. The floor app surfaces
+    // "PAID" on the tile and prompts the host to clear — advisory, not
+    // autopilot, so the table's live status is NOT changed here (the
+    // party may still be seated enjoying the evening).
+    await recordPaid({
+      id,
+      subtotalCents: settled.subtotalCents,
+      totalCents: settled.totalCents,
+      tipCents: settled.tipCents,
+      guestCount: settled.guestCount,
+    });
+    await emitServiceEvents([
+      {
+        type: "CHECK_PAID",
+        partyKey: existing!.partyKey,
+        tableIds: existing!.tableId ? [existing!.tableId] : [],
+        serverId: existing!.serverId,
+        checkId: id,
+        payload: {
+          tableLabel: existing!.tableLabel,
+          method: p.data.method,
+          totalCents: settled.totalCents,
+          tipCents: settled.tipCents,
+          guestCount: settled.guestCount,
+          perGuestCents: Math.round(settled.totalCents / Math.max(1, settled.guestCount)),
+        },
+      },
+      {
+        type: "CHECK_CLOSED",
+        partyKey: existing!.partyKey,
+        tableIds: existing!.tableId ? [existing!.tableId] : [],
+        serverId: existing!.serverId,
+        checkId: id,
+        payload: { tableLabel: existing!.tableLabel },
+      },
+    ]);
   }
   return NextResponse.json({ ...settled, status: closed ? "closed" : "open", changeCents });
 }
