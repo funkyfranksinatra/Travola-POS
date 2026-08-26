@@ -3,17 +3,22 @@
 // POST /api/pos/kds/:stationKey — bump {checkId} (whole ticket) or {itemId}.
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma, RESTAURANT_ID } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
+import { requireRestaurant } from "@/lib/tenant";
 import { err } from "@/lib/pos-api";
 import { emitServiceEvents, recordBump } from "@/lib/service-events";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ stationKey: string }> }) {
+  const auth = await requireRestaurant();
+  if ("response" in auth) return auth.response;
+  const { restaurantId } = auth;
+
   const { stationKey } = await ctx.params;
   const lines = await prisma.checkItem.findMany({
     where: {
       station: stationKey,
       state: "fired",
-      check: { restaurantId: RESTAURANT_ID, status: "open" },
+      check: { restaurantId, status: "open" },
     },
     orderBy: { firedAt: "asc" },
     include: { check: { select: { id: true, tableLabel: true, serverName: true, guestCount: true } } },
@@ -48,6 +53,10 @@ const Body = z.union([
 ]);
 
 export async function POST(req: Request, ctx: { params: Promise<{ stationKey: string }> }) {
+  const auth = await requireRestaurant();
+  if ("response" in auth) return auth.response;
+  const { restaurantId } = auth;
+
   const { stationKey } = await ctx.params;
   const p = Body.safeParse(await req.json().catch(() => null));
   if (!p.success) return err(400, "invalid body");
@@ -61,7 +70,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ stationKey: st
     where,
     select: { checkId: true, course: true, firedAt: true, check: { select: { restaurantId: true, partyKey: true, tableId: true, tableLabel: true, serverId: true } } },
   });
-  if (!target || target.check.restaurantId !== RESTAURANT_ID) return err(404, "nothing to bump");
+  if (!target || target.check.restaurantId !== restaurantId) return err(404, "nothing to bump");
   const { count } = await prisma.checkItem.updateMany({
     where,
     data: { state: "bumped", bumpedAt: new Date() },
@@ -69,8 +78,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ stationKey: st
   if (!count) return err(404, "nothing to bump");
   // Shared-DB link: course pacing to the session + the bus ("entrées
   // bumped 4m ago" is the sentry's favorite fact).
-  await recordBump(target.checkId);
-  await emitServiceEvents([{
+  await recordBump(restaurantId, target.checkId);
+  await emitServiceEvents(restaurantId, [{
     type: "COURSE_BUMPED",
     partyKey: target.check.partyKey,
     tableIds: target.check.tableId ? [target.check.tableId] : [],

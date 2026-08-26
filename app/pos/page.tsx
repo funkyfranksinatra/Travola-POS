@@ -163,6 +163,15 @@ export default function PosTerminal() {
     router.push("/login");
   };
 
+  // Sign the DEVICE out of the restaurant (not just the person). The
+  // next user must re-enter the restaurant name + passcode — for when a
+  // terminal leaves the building, or a demo tablet changes venue.
+  const signOutDevice = async () => {
+    await api("/api/pos/restaurant", { method: "DELETE", json: {} }).catch(() => {});
+    await api("/api/pos/auth", { method: "DELETE", json: {} }).catch(() => {});
+    router.push("/login");
+  };
+
   // Add-on admin (shared with the sheet)
   const createAddOn = async (item: Item, name: string, priceCents: number, permanent: boolean) => {
     try {
@@ -329,8 +338,9 @@ export default function PosTerminal() {
         {confirmOut && (
           <Overlay onClose={() => setConfirmOut(false)}>
             <h2 className="text-lg font-semibold text-ink-50 mb-2">Log out?</h2>
-            <p className="text-sm text-ink-400 mb-5">The next server signs in with their PIN.</p>
-            <div className="flex gap-2 justify-end">
+            <p className="text-sm text-ink-400 mb-5">The next server signs in with their PIN. This device stays signed in to the restaurant.</p>
+            <div className="flex items-center gap-2 justify-end">
+              <button onClick={signOutDevice} className="mr-auto text-xs text-ink-400 hover:text-ink-50 underline">Sign device out of restaurant</button>
               <button onClick={() => setConfirmOut(false)} className="px-4 py-2 rounded-xl text-ink-400 hover:bg-panel-up">Cancel</button>
               <button onClick={logout} className="px-4 py-2 rounded-xl font-medium bg-state-seatedBg text-state-seated">Log out</button>
             </div>
@@ -521,8 +531,9 @@ export default function PosTerminal() {
       {confirmOut && (
         <Overlay onClose={() => setConfirmOut(false)}>
           <h2 className="text-lg font-semibold text-ink-50 mb-2">Log out?</h2>
-          <p className="text-sm text-ink-400 mb-5">The next server signs in with their PIN.</p>
-          <div className="flex gap-2 justify-end">
+          <p className="text-sm text-ink-400 mb-5">The next server signs in with their PIN. This device stays signed in to the restaurant.</p>
+          <div className="flex items-center gap-2 justify-end">
+            <button onClick={signOutDevice} className="mr-auto text-xs text-ink-400 hover:text-ink-50 underline">Sign device out of restaurant</button>
             <button onClick={() => setConfirmOut(false)} className="px-4 py-2 rounded-xl text-ink-400 hover:bg-panel-up">Cancel</button>
             <button onClick={logout} className="px-4 py-2 rounded-xl font-medium bg-state-seatedBg text-state-seated">Log out</button>
           </div>

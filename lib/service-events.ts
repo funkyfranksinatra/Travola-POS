@@ -6,7 +6,7 @@
 // and course pacing — the floor app surfaces the events live and shift
 // intelligence trains on the sessions. Every helper here is
 // best-effort: a bus failure must never fail the order or the payment.
-import { prisma, RESTAURANT_ID } from "./prisma";
+import { prisma } from "./prisma";
 
 export type ServiceEventInput = {
   type: string;
@@ -24,13 +24,13 @@ export function todayServiceDate(): Date {
   return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
 }
 
-export async function emitServiceEvents(events: ServiceEventInput[]) {
+export async function emitServiceEvents(restaurantId: string, events: ServiceEventInput[]) {
   if (!events.length) return;
   try {
     const serviceDate = todayServiceDate();
     await prisma.serviceEvent.createMany({
       data: events.map((e) => ({
-        restaurantId: RESTAURANT_ID,
+        restaurantId,
         source: "pos",
         type: e.type,
         partyKey: e.partyKey ?? null,
@@ -47,10 +47,10 @@ export async function emitServiceEvents(events: ServiceEventInput[]) {
 }
 
 /** The open TableSession for a table (clearedAt null), if any. */
-export async function openSessionForTable(tableId: string) {
+export async function openSessionForTable(restaurantId: string, tableId: string) {
   try {
     return await prisma.tableSession.findFirst({
-      where: { restaurantId: RESTAURANT_ID, clearedAt: null, tableIds: { has: tableId } },
+      where: { restaurantId, clearedAt: null, tableIds: { has: tableId } },
       orderBy: { seatedAt: "desc" },
     });
   } catch {
@@ -62,6 +62,7 @@ export async function openSessionForTable(tableId: string) {
  *  session when the POS itself seated the party (walk-in at the table,
  *  no host stand involved). */
 export async function attachCheckToSession(opts: {
+  restaurantId: string;
   tableId: string;
   checkId: string;
   partyKey?: string | null;
@@ -70,7 +71,7 @@ export async function attachCheckToSession(opts: {
   guestCount: number;
 }) {
   try {
-    const existing = await openSessionForTable(opts.tableId);
+    const existing = await openSessionForTable(opts.restaurantId, opts.tableId);
     if (existing) {
       await prisma.tableSession.update({
         where: { id: existing.id },
@@ -84,7 +85,7 @@ export async function attachCheckToSession(opts: {
     }
     const created = await prisma.tableSession.create({
       data: {
-        restaurantId: RESTAURANT_ID,
+        restaurantId: opts.restaurantId,
         serviceDate: todayServiceDate(),
         partyKey: opts.partyKey ?? null,
         partyName: opts.partyName ?? null,
@@ -106,11 +107,11 @@ export async function attachCheckToSession(opts: {
 
 /** Stamp order/course pacing on the check's session. Records
  *  firstOrderAt once, lastFireAt always, and appends courseTimings. */
-export async function recordFire(checkId: string, course: number, firedCount: number) {
+export async function recordFire(restaurantId: string, checkId: string, course: number, firedCount: number) {
   if (!firedCount) return;
   try {
     const session = await prisma.tableSession.findFirst({
-      where: { restaurantId: RESTAURANT_ID, checkId, clearedAt: null },
+      where: { restaurantId, checkId, clearedAt: null },
     });
     if (!session) return;
     const now = new Date();
@@ -129,10 +130,10 @@ export async function recordFire(checkId: string, course: number, firedCount: nu
 }
 
 /** Stamp bump pacing on the check's session. */
-export async function recordBump(checkId: string) {
+export async function recordBump(restaurantId: string, checkId: string) {
   try {
     await prisma.tableSession.updateMany({
-      where: { restaurantId: RESTAURANT_ID, checkId, clearedAt: null },
+      where: { restaurantId, checkId, clearedAt: null },
       data: { lastBumpAt: new Date() },
     });
   } catch (err) {
@@ -141,7 +142,7 @@ export async function recordBump(checkId: string) {
 }
 
 /** Stamp the money + paid time when the check settles. */
-export async function recordPaid(check: {
+export async function recordPaid(restaurantId: string, check: {
   id: string;
   subtotalCents: number;
   totalCents: number;
@@ -150,7 +151,7 @@ export async function recordPaid(check: {
 }) {
   try {
     const session = await prisma.tableSession.findFirst({
-      where: { restaurantId: RESTAURANT_ID, checkId: check.id, clearedAt: null },
+      where: { restaurantId, checkId: check.id, clearedAt: null },
     });
     if (!session) return;
     await prisma.tableSession.update({

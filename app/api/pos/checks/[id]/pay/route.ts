@@ -4,7 +4,8 @@
 // Card (Stripe Terminal) lands here in Phase 2 as method:"card".
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma, RESTAURANT_ID } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
+import { requireRestaurant } from "@/lib/tenant";
 import { err, assertOpen, recomputeCheck } from "@/lib/pos-api";
 import { changeDueCents } from "@/lib/check-math";
 import { emitServiceEvents, recordPaid } from "@/lib/service-events";
@@ -19,12 +20,16 @@ const Body = z.object({
 });
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const auth = await requireRestaurant();
+  if ("response" in auth) return auth.response;
+  const { restaurantId } = auth;
+
   const { id } = await ctx.params;
   const p = Body.safeParse(await req.json().catch(() => null));
   if (!p.success) return err(400, "invalid body");
 
   const existing = await prisma.check.findFirst({
-    where: { id, restaurantId: RESTAURANT_ID },
+    where: { id, restaurantId },
     include: { items: true },
   });
   const bad = assertOpen(existing);
@@ -39,7 +44,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       data: { tipCents: { increment: p.data.tipCents } },
     });
   }
-  const fresh = await recomputeCheck(id);
+  const fresh = await recomputeCheck(restaurantId, id);
   if (!fresh) return err(404, "no such check");
   const due = fresh.balanceDueCents;
   if (due <= 0) return err(409, "check already settled");
@@ -60,7 +65,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   await prisma.payment.create({
     data: {
-      restaurantId: RESTAURANT_ID,
+      restaurantId,
       checkId: id,
       method: p.data.method,
       amountCents,
@@ -69,7 +74,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     },
   });
 
-  const settled = await recomputeCheck(id);
+  const settled = await recomputeCheck(restaurantId, id);
   let closed = false;
   if (settled && settled.balanceDueCents <= 0) {
     await prisma.check.update({
@@ -82,14 +87,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     // "PAID" on the tile and prompts the host to clear — advisory, not
     // autopilot, so the table's live status is NOT changed here (the
     // party may still be seated enjoying the evening).
-    await recordPaid({
+    await recordPaid(restaurantId, {
       id,
       subtotalCents: settled.subtotalCents,
       totalCents: settled.totalCents,
       tipCents: settled.tipCents,
       guestCount: settled.guestCount,
     });
-    await emitServiceEvents([
+    await emitServiceEvents(restaurantId, [
       {
         type: "CHECK_PAID",
         partyKey: existing!.partyKey,

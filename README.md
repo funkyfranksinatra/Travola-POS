@@ -53,4 +53,24 @@ database. The Travola-OS repo owns every migration; this repo only runs
 floor app's tables. The two apps talk through the append-only
 `ServiceEvent` bus and enrich the same `TableSession` analytics rows.
 
+## Signing in
+
+Two layers, matching how a restaurant actually opens up:
+
+1. **Restaurant** — a device signs in once with the restaurant name and
+   the **same 4-digit passcode the manager set in Travola-OS**. Same
+   credential, same scrypt verification, same signed-cookie scheme as
+   the floor app's `/api/auth/login`. The session cookie
+   (`travola_pos_session`) scopes every query in every request; there is
+   no build-time tenant constant. The POS has no register endpoint —
+   restaurants and passcodes are created and changed on the floor app.
+2. **Staff PIN** — whoever is holding the terminal taps a 4-digit PIN
+   from the floor app's roster (`Server.pin`), so checks, tips, and
+   section rules attach to a person. The restaurant passcode also works
+   here and grants manager access — which is how a brand-new restaurant
+   gets in on day one, before any server PINs have been handed out.
+
+Signing a person out returns to the PIN pad; "Sign device out of
+restaurant" clears the venue session too.
+
 `npm test` runs the check-math unit suite.

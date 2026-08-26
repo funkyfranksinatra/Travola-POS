@@ -9,20 +9,25 @@
 // without the host stand) — the floor app sees the party appear live.
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma, RESTAURANT_ID } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
+import { requireRestaurant } from "@/lib/tenant";
 import { err } from "@/lib/pos-api";
-import { currentServer } from "@/lib/auth";
+import { currentServer, persistableServerId } from "@/lib/auth";
 import { attachCheckToSession, emitServiceEvents, todayServiceDate } from "@/lib/service-events";
 
 export async function GET(req: Request) {
-  const me = await currentServer();
+  const auth = await requireRestaurant();
+  if ("response" in auth) return auth.response;
+  const { restaurantId } = auth;
+
+  const me = await currentServer(restaurantId);
   if (!me) return err(401, "not logged in");
   const url = new URL(req.url);
   const status = url.searchParams.get("status") ?? "open";
   const mine = url.searchParams.get("mine") !== "0";
   const checks = await prisma.check.findMany({
     where: {
-      restaurantId: RESTAURANT_ID,
+      restaurantId,
       ...(status === "all" ? {} : { status }),
       ...(mine && me.role !== "manager" ? { serverId: me.id } : {}),
     },
@@ -37,12 +42,12 @@ export async function GET(req: Request) {
  *  to this table today, else the SEATED walk-in matching the party
  *  label. Raw SQL because Reservation/WaitlistEntry aren't mirrored in
  *  the POS client — read-only, indexed, and guarded. */
-async function resolvePartyKey(tableId: string, partyName: string | null) {
+async function resolvePartyKey(restaurantId: string, tableId: string, partyName: string | null) {
   try {
     const rows = await prisma.$queryRaw<Array<{ id: string }>>`
       SELECT r."id" FROM "Reservation" r
       JOIN "ReservationTable" rt ON rt."reservationId" = r."id"
-      WHERE r."restaurantId" = ${RESTAURANT_ID}
+      WHERE r."restaurantId" = ${restaurantId}
         AND r."serviceDate" = ${todayServiceDate()}::date
         AND r."status" = 'SEATED'
         AND rt."tableId" = ${tableId}
@@ -52,7 +57,7 @@ async function resolvePartyKey(tableId: string, partyName: string | null) {
     if (partyName) {
       const walkIns = await prisma.$queryRaw<Array<{ id: string }>>`
         SELECT w."id" FROM "WaitlistEntry" w
-        WHERE w."restaurantId" = ${RESTAURANT_ID}
+        WHERE w."restaurantId" = ${restaurantId}
           AND w."serviceDate" = ${todayServiceDate()}::date
           AND w."status" = 'SEATED'
           AND w."name" = ${partyName}
@@ -74,7 +79,11 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  const me = await currentServer();
+  const auth = await requireRestaurant();
+  if ("response" in auth) return auth.response;
+  const { restaurantId } = auth;
+
+  const me = await currentServer(restaurantId);
   if (!me) return err(401, "not logged in");
   const p = Body.safeParse(await req.json().catch(() => null));
   if (!p.success) return err(400, "invalid body");
@@ -87,13 +96,13 @@ export async function POST(req: Request) {
 
   if (p.data.tableId) {
     const table = await prisma.table.findFirst({
-      where: { id: p.data.tableId, restaurantId: RESTAURANT_ID, active: true },
+      where: { id: p.data.tableId, restaurantId, active: true },
     });
     if (!table) return err(404, "no such table");
     if (me.role !== "manager" && table.assignedServerId != null && table.assignedServerId !== me.id)
       return err(403, "not your section");
     const existing = await prisma.check.findFirst({
-      where: { restaurantId: RESTAURANT_ID, tableId: table.id, status: "open" },
+      where: { restaurantId, tableId: table.id, status: "open" },
     });
     if (existing) return err(409, "table already has an open check");
     tableId = table.id;
@@ -116,16 +125,16 @@ export async function POST(req: Request) {
       });
       partyName = `Walk-in (${me.name})`;
     }
-    if (!partyKey) partyKey = await resolvePartyKey(table.id, table.party);
+    if (!partyKey) partyKey = await resolvePartyKey(restaurantId, table.id, table.party);
   }
   if (!tableLabel) return err(400, "tableId or tableLabel required");
 
   const check = await prisma.check.create({
     data: {
-      restaurantId: RESTAURANT_ID,
+      restaurantId,
       tableLabel,
       tableId,
-      serverId: me.id,
+      serverId: persistableServerId(me),
       serverName: me.name,
       guestCount: p.data.guestCount,
       partyKey,
@@ -135,21 +144,22 @@ export async function POST(req: Request) {
 
   if (tableId) {
     await attachCheckToSession({
+      restaurantId,
       tableId,
       checkId: check.id,
       partyKey,
       partyName,
-      serverId: me.id,
+      serverId: persistableServerId(me),
       guestCount: p.data.guestCount,
     });
   }
-  await emitServiceEvents([
+  await emitServiceEvents(restaurantId, [
     ...(seatedByPos && tableId
       ? [{
           type: "TABLE_SEATED",
           partyKey,
           tableIds: [tableId],
-          serverId: me.id,
+          serverId: persistableServerId(me),
           payload: { party: partyName, partySize: p.data.guestCount, origin: "pos_walk_in" },
         }]
       : []),
@@ -157,7 +167,7 @@ export async function POST(req: Request) {
       type: "CHECK_OPENED",
       partyKey,
       tableIds: tableId ? [tableId] : [],
-      serverId: me.id,
+      serverId: persistableServerId(me),
       checkId: check.id,
       payload: { tableLabel, guestCount: p.data.guestCount, serverName: me.name },
     },

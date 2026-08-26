@@ -3,7 +3,8 @@
 // the client sends only ids + choices. 86'd items are rejected here.
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma, RESTAURANT_ID } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
+import { requireRestaurant } from "@/lib/tenant";
 import { err, assertOpen, recomputeCheck } from "@/lib/pos-api";
 
 const Body = z.object({
@@ -23,12 +24,16 @@ const Body = z.object({
 });
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const auth = await requireRestaurant();
+  if ("response" in auth) return auth.response;
+  const { restaurantId } = auth;
+
   const { id } = await ctx.params;
   const p = Body.safeParse(await req.json().catch(() => null));
   if (!p.success) return err(400, "invalid body");
 
   const check = await prisma.check.findFirst({
-    where: { id, restaurantId: RESTAURANT_ID },
+    where: { id, restaurantId },
   });
   const bad = assertOpen(check);
   if (bad) return err(check ? 409 : 404, bad);
@@ -39,11 +44,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const allAddOnIds = [...new Set(p.data.lines.flatMap((l) => l.addOnIds))];
   const [menuItems, addOns] = await Promise.all([
     prisma.menuItem.findMany({
-      where: { id: { in: itemIds }, restaurantId: RESTAURANT_ID },
+      where: { id: { in: itemIds }, restaurantId },
       include: { modifierGroups: { include: { modifiers: true } } },
     }),
     allAddOnIds.length
-      ? prisma.addOn.findMany({ where: { id: { in: allAddOnIds }, restaurantId: RESTAURANT_ID } })
+      ? prisma.addOn.findMany({ where: { id: { in: allAddOnIds }, restaurantId } })
       : Promise.resolve([]),
   ]);
   const byId = new Map(menuItems.map((m) => [m.id, m]));
@@ -92,5 +97,5 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     });
   }
   await prisma.checkItem.createMany({ data: creates });
-  return NextResponse.json(await recomputeCheck(id));
+  return NextResponse.json(await recomputeCheck(restaurantId, id));
 }

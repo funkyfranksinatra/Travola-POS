@@ -30,6 +30,20 @@ datasource db {
 
 // ─── Shared: staff & floor (Travola-OS is the source of truth) ───────
 
+/// The account boundary, owned by the floor app. The POS READS it to
+/// verify the restaurant's name + 4-digit passcode at sign-in — the same
+/// credential a manager uses on Travola-OS. The POS never creates a
+/// restaurant or changes a passcode; that stays a floor-app act.
+model Restaurant {
+  id            String   @id @default(cuid())
+  name          String
+  nameKey       String   @unique
+  passcodeHash  String
+  recoveryEmail String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
 /// The floor app's staff table. POS reads it for PIN login and section
 /// ownership; `pin` is the one column the shared-DB migration added
 /// for the POS. POS never creates or deletes servers.

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma, RESTAURANT_ID } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
+import { requireRestaurant } from "@/lib/tenant";
 import { err } from "@/lib/pos-api";
 
 const Body = z.object({
@@ -13,12 +14,16 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
+  const auth = await requireRestaurant();
+  if ("response" in auth) return auth.response;
+  const { restaurantId } = auth;
+
   const p = Body.safeParse(await req.json().catch(() => null));
   if (!p.success) return err(400, "invalid body");
   const { modifiers, ...data } = p.data;
   const group = await prisma.modifierGroup.create({
     data: {
-      restaurantId: RESTAURANT_ID,
+      restaurantId,
       ...data,
       modifiers: {
         create: modifiers.map((m, i) => ({ ...m, sortOrder: i })),

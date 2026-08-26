@@ -2,18 +2,18 @@
 // Server-authoritative: every mutation recomputes + persists totals here;
 // clients never send computed money.
 import { NextResponse } from "next/server";
-import { prisma, RESTAURANT_ID } from "./prisma";
+import { prisma } from "./prisma";
 import { computeTotals, balanceDueCents } from "./check-math";
 
 export const err = (status: number, message: string) =>
   NextResponse.json({ error: message }, { status });
 
-export async function getSettings() {
+export async function getSettings(restaurantId: string) {
   return (
     (await prisma.posSettings.findUnique({
-      where: { restaurantId: RESTAURANT_ID },
+      where: { restaurantId },
     })) ??
-    (await prisma.posSettings.create({ data: { restaurantId: RESTAURANT_ID } }))
+    (await prisma.posSettings.create({ data: { restaurantId } }))
   );
 }
 
@@ -23,13 +23,13 @@ const CHECK_INCLUDE = {
 };
 
 /** Load a check, recompute + persist totals, return the fresh payload. */
-export async function recomputeCheck(checkId: string) {
+export async function recomputeCheck(restaurantId: string, checkId: string) {
   const check = await prisma.check.findFirst({
-    where: { id: checkId, restaurantId: RESTAURANT_ID },
+    where: { id: checkId, restaurantId },
     include: CHECK_INCLUDE,
   });
   if (!check) return null;
-  const settings = await getSettings();
+  const settings = await getSettings(restaurantId);
   const totals = computeTotals(
     check.items as never,
     settings.taxRateBps,

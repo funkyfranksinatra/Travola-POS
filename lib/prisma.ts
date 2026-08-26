@@ -19,15 +19,7 @@ if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prismaPos = prisma;
 }
 
-// The restaurant this POS deployment serves. One deployment = one
-// restaurant at pilot scale; POS_RESTAURANT_ID is the Restaurant.id
-// from the shared database (Vercel env / .env). The rest_demo fallback
-// keeps local sandboxes bootable against a scratch database.
-export const RESTAURANT_ID = process.env.POS_RESTAURANT_ID ?? "rest_demo";
-
-if (process.env.NODE_ENV === "production" && !process.env.POS_RESTAURANT_ID) {
-  console.warn(
-    "[pos] POS_RESTAURANT_ID is not set — running against the rest_demo " +
-      "tenant. Set it to the shared database's Restaurant.id."
-  );
-}
+// NOTE: there is no RESTAURANT_ID constant any more. The tenant comes
+// from the signed restaurant session on every request — see lib/tenant.ts
+// (`requireRestaurant`). POS_RESTAURANT_ID remains only as a
+// non-production convenience for local sandboxes and the seed script.

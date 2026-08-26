@@ -3,9 +3,10 @@
 //
 // SHARED-DB build: staff and floor live in the Travola-OS tables and
 // are NEVER seeded from here — the floor app owns them. Set
-// POS_RESTAURANT_ID to seed the menu into a real restaurant tenant
-// (default rest_demo for scratch databases). Server PINs are set on the
-// shared Server table (see the OS repo's scripts or SQL).
+// POS_RESTAURANT_ID to the Restaurant.id you want the menu seeded into
+// (default rest_demo for scratch databases). This CLI binding is the
+// only place that env var is authoritative — the running app always
+// takes its tenant from the signed-in restaurant session instead.
 import "dotenv/config";
 import { PrismaClient } from "../lib/generated/prisma/index.js";
 import { PrismaPg } from "@prisma/adapter-pg";

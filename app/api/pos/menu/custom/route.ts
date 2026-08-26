@@ -6,7 +6,8 @@
 // exact same battle-tested path as regular items.
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma, RESTAURANT_ID } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
+import { requireRestaurant } from "@/lib/tenant";
 import { err } from "@/lib/pos-api";
 import { currentServer } from "@/lib/auth";
 import { nextShiftClose } from "@/lib/shift";
@@ -19,29 +20,33 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  const me = await currentServer();
+  const auth = await requireRestaurant();
+  if ("response" in auth) return auth.response;
+  const { restaurantId } = auth;
+
+  const me = await currentServer(restaurantId);
   if (!me) return err(401, "not logged in");
   const p = Body.safeParse(await req.json().catch(() => null));
   if (!p.success) return err(400, "invalid body");
 
   // Ephemeral items live in a hidden "Custom" category (created lazily).
   let cat = await prisma.menuCategory.findFirst({
-    where: { restaurantId: RESTAURANT_ID, name: "__custom__" },
+    where: { restaurantId, name: "__custom__" },
   });
   if (!cat) {
     cat = await prisma.menuCategory.create({
-      data: { restaurantId: RESTAURANT_ID, name: "__custom__", sortOrder: 999, active: false },
+      data: { restaurantId, name: "__custom__", sortOrder: 999, active: false },
     });
   }
   const item = await prisma.menuItem.create({
     data: {
-      restaurantId: RESTAURANT_ID,
+      restaurantId,
       categoryId: cat.id,
       name: p.data.name,
       priceCents: p.data.priceCents,
       station: p.data.kind === "drink" ? "bar" : "kitchen",
       ephemeral: true,
-      expiresAt: await nextShiftClose(),
+      expiresAt: await nextShiftClose(restaurantId),
       description: p.data.description,
       createdBy: me.name,
     },

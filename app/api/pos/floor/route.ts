@@ -9,7 +9,8 @@
 // normalized into 0–100% space via their bounding box, with tile sizes
 // mirrored from the floor app's capacity buckets.
 import { NextResponse } from "next/server";
-import { prisma, RESTAURANT_ID } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
+import { requireRestaurant } from "@/lib/tenant";
 import { currentServer } from "@/lib/auth";
 import { err } from "@/lib/pos-api";
 
@@ -31,25 +32,29 @@ function posState(status: string) {
 }
 
 export async function GET() {
-  const me = await currentServer();
+  const auth = await requireRestaurant();
+  if ("response" in auth) return auth.response;
+  const { restaurantId } = auth;
+
+  const me = await currentServer(restaurantId);
   if (!me) return err(401, "not logged in");
 
   const [floors, tables, servers, openChecks] = await Promise.all([
     prisma.floor.findMany({
-      where: { restaurantId: RESTAURANT_ID, active: true },
+      where: { restaurantId, active: true },
       orderBy: { sortOrder: "asc" },
       select: { id: true, name: true },
     }),
     prisma.table.findMany({
-      where: { restaurantId: RESTAURANT_ID, active: true },
+      where: { restaurantId, active: true },
       orderBy: { name: "asc" },
     }),
     prisma.server.findMany({
-      where: { restaurantId: RESTAURANT_ID, active: true },
+      where: { restaurantId, active: true },
       select: { id: true, name: true, colorHex: true, roles: true },
     }),
     prisma.check.findMany({
-      where: { restaurantId: RESTAURANT_ID, status: "open" },
+      where: { restaurantId, status: "open" },
       include: { items: { select: { state: true } } },
     }),
   ]);

@@ -3,7 +3,8 @@
 // in the UI). Managers create permanent ones (or ephemeral if they ask).
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma, RESTAURANT_ID } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
+import { requireRestaurant } from "@/lib/tenant";
 import { err } from "@/lib/pos-api";
 import { currentServer } from "@/lib/auth";
 import { nextShiftClose } from "@/lib/shift";
@@ -16,7 +17,11 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  const me = await currentServer();
+  const auth = await requireRestaurant();
+  if ("response" in auth) return auth.response;
+  const { restaurantId } = auth;
+
+  const me = await currentServer(restaurantId);
   if (!me) return err(401, "not logged in");
   const p = Body.safeParse(await req.json().catch(() => null));
   if (!p.success) return err(400, "invalid body");
@@ -24,19 +29,19 @@ export async function POST(req: Request) {
     return err(403, "only a manager can create permanent add-ons");
   if (p.data.menuItemId) {
     const item = await prisma.menuItem.findFirst({
-      where: { id: p.data.menuItemId, restaurantId: RESTAURANT_ID },
+      where: { id: p.data.menuItemId, restaurantId },
     });
     if (!item) return err(404, "no such menu item");
   }
   const ephemeral = !p.data.permanent;
   const addOn = await prisma.addOn.create({
     data: {
-      restaurantId: RESTAURANT_ID,
+      restaurantId,
       menuItemId: p.data.menuItemId ?? null,
       name: p.data.name,
       priceCents: p.data.priceCents,
       ephemeral,
-      expiresAt: ephemeral ? await nextShiftClose() : null,
+      expiresAt: ephemeral ? await nextShiftClose(restaurantId) : null,
       createdBy: me.name,
     },
   });

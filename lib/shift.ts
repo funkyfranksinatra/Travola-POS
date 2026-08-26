@@ -5,7 +5,7 @@
 // service-reset boundary — the same tick the floor app uses to wipe
 // live table state (close + 90min, or open − 60min, or 4:00 AM when
 // hours are unset), so "decays at shift end" now means the REAL shift.
-import { prisma, RESTAURANT_ID } from "./prisma";
+import { prisma } from "./prisma";
 
 // Fallbacks when the settings row is missing (scratch databases).
 export const SHIFT_OPEN_HOUR = 7;
@@ -28,10 +28,10 @@ function nextResetTick(now: Date, openMinutes: number | null, closeMinutes: numb
 
 /** The next shift-end boundary — reads the shared settings; falls back
  *  to the legacy 14:00 close on scratch databases. */
-export async function nextShiftClose(now: Date = new Date()): Promise<Date> {
+export async function nextShiftClose(restaurantId: string, now: Date = new Date()): Promise<Date> {
   try {
     const settings = await prisma.restaurantSettings.findUnique({
-      where: { restaurantId: RESTAURANT_ID },
+      where: { restaurantId },
       select: { openMinutes: true, closeMinutes: true },
     });
     if (settings) return nextResetTick(now, settings.openMinutes, settings.closeMinutes);

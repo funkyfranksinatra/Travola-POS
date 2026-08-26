@@ -1,14 +1,26 @@
 // Launcher — where a device picks its role (server terminal, KDS, menu).
 import Link from "next/link";
-import { prisma, RESTAURANT_ID } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
+import { currentRestaurantId } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
+  // proxy.ts guarantees a session here; treat a miss as "no stations".
+  const restaurantId = await currentRestaurantId();
   // Render even if the DB isn't reachable yet (fresh deploy, cold env).
-  const stations = await prisma.station
-    .findMany({ where: { restaurantId: RESTAURANT_ID }, orderBy: { key: "asc" } })
-    .catch(() => []);
+  const [stations, restaurant] = await Promise.all([
+    restaurantId
+      ? prisma.station
+          .findMany({ where: { restaurantId }, orderBy: { key: "asc" } })
+          .catch(() => [])
+      : Promise.resolve([]),
+    restaurantId
+      ? prisma.restaurant
+          .findUnique({ where: { id: restaurantId }, select: { name: true } })
+          .catch(() => null)
+      : Promise.resolve(null),
+  ]);
   return (
     <main className="flex-1 flex items-center justify-center p-8">
       <div className="w-full max-w-2xl">
@@ -18,7 +30,9 @@ export default async function Home() {
           </div>
           <div>
             <h1 className="text-2xl font-semibold text-ink-50">Travola POS</h1>
-            <p className="text-sm text-ink-400">Pick this device&apos;s role</p>
+            <p className="text-sm text-ink-400">
+              {restaurant ? `${restaurant.name} — pick this device's role` : "Pick this device's role"}
+            </p>
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
