@@ -63,7 +63,13 @@ export async function openSessionForTable(restaurantId: string, tableId: string)
  *  no host stand involved). */
 export async function attachCheckToSession(opts: {
   restaurantId: string;
+  /** The party's anchor table (the group's primary when merged). */
   tableId: string;
+  /** EVERY table the party occupies. A merged party that records only
+   *  its anchor breaks the floor app's session lookup (which matches on
+   *  `tableIds has <cleared table>`) and understates the footprint in
+   *  shift intelligence. Defaults to [tableId]. */
+  tableIds?: string[];
   checkId: string;
   partyKey?: string | null;
   partyName?: string | null;
@@ -73,12 +79,14 @@ export async function attachCheckToSession(opts: {
   try {
     const existing = await openSessionForTable(opts.restaurantId, opts.tableId);
     if (existing) {
+      const merged = [...new Set([...existing.tableIds, ...(opts.tableIds ?? [opts.tableId])])];
       await prisma.tableSession.update({
         where: { id: existing.id },
         data: {
           checkId: opts.checkId,
           serverId: existing.serverId ?? opts.serverId ?? null,
           guestCount: existing.guestCount ?? opts.guestCount,
+          ...(merged.length !== existing.tableIds.length ? { tableIds: merged } : {}),
         },
       });
       return existing.id;
@@ -89,7 +97,7 @@ export async function attachCheckToSession(opts: {
         serviceDate: todayServiceDate(),
         partyKey: opts.partyKey ?? null,
         partyName: opts.partyName ?? null,
-        tableIds: [opts.tableId],
+        tableIds: opts.tableIds?.length ? opts.tableIds : [opts.tableId],
         primaryTableId: opts.tableId,
         serverId: opts.serverId ?? null,
         guestCount: opts.guestCount,

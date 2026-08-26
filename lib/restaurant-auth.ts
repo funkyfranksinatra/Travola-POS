@@ -8,12 +8,14 @@
 import { scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { prisma } from "./prisma";
+// Shared verbatim with Travola-OS (lib/name-key.ts). The two apps MUST
+// agree on this function: it is what makes "Volario's" typed on an iPad
+// (curly apostrophe) resolve to the same restaurant the manager
+// registered from a desktop.
+export { nameKey } from "./name-key";
+import { nameKey } from "./name-key";
 
 const scrypt = promisify(scryptCallback);
-
-export function nameKey(name: unknown) {
-  return String(name ?? "").trim().toLowerCase();
-}
 
 export async function verifyPasscode(passcode: string, stored: string) {
   const [algorithm, salt, encoded] = stored.split("$");

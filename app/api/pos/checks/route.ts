@@ -14,6 +14,7 @@ import { requireRestaurant } from "@/lib/tenant";
 import { err } from "@/lib/pos-api";
 import { currentServer, persistableServerId } from "@/lib/auth";
 import { attachCheckToSession, emitServiceEvents, todayServiceDate } from "@/lib/service-events";
+import { tableCollator } from "@/lib/floor-geometry";
 
 export async function GET(req: Request) {
   const auth = await requireRestaurant();
@@ -93,6 +94,7 @@ export async function POST(req: Request) {
   let partyKey: string | null = p.data.partyKey ?? null;
   let partyName: string | null = null;
   let seatedByPos = false;
+  let partyTableIds: string[] = [];
 
   if (p.data.tableId) {
     const table = await prisma.table.findFirst({
@@ -101,20 +103,36 @@ export async function POST(req: Request) {
     if (!table) return err(404, "no such table");
     if (me.role !== "manager" && table.assignedServerId != null && table.assignedServerId !== me.id)
       return err(403, "not your section");
+
+    // A merged party ("7 + 8") is ONE party and gets ONE check. Resolve
+    // the whole group up front: the check attaches to the group's
+    // primary table (lowest table name) and carries the combined label,
+    // so tapping either half of a merge lands on the same check and the
+    // money can never split across two.
+    const groupMembers = table.groupId
+      ? await prisma.table.findMany({
+          where: { restaurantId, active: true, groupId: table.groupId },
+        })
+      : [table];
+    const members = [...groupMembers].sort((a, b) => tableCollator.compare(a.name, b.name));
+    const primary = members[0] ?? table;
+
     const existing = await prisma.check.findFirst({
-      where: { restaurantId, tableId: table.id, status: "open" },
+      where: { restaurantId, tableId: { in: members.map((m) => m.id) }, status: "open" },
     });
     if (existing) return err(409, "table already has an open check");
-    tableId = table.id;
-    tableLabel = table.name;
-    partyName = table.party;
+    tableId = primary.id;
+    tableLabel = members.length > 1 ? members.map((m) => m.name).join(" + ") : table.name;
+    partyName = members.map((m) => m.party).find((name) => name) ?? table.party;
 
-    if (table.status === "available") {
+    if (primary.status === "available" && members.every((m) => m.status === "available")) {
       // POS-side seat: the server sat a walk-in at their table without
       // the host stand. Write live floor state so the host sees it.
       seatedByPos = true;
-      await prisma.table.update({
-        where: { id: table.id },
+      // Seat every member of the merge, so the host stand shows the
+      // whole party rather than half of it.
+      await prisma.table.updateMany({
+        where: { id: { in: members.map((m) => m.id) }, restaurantId },
         data: {
           status: "seated",
           party: `Walk-in (${me.name})`,
@@ -125,7 +143,10 @@ export async function POST(req: Request) {
       });
       partyName = `Walk-in (${me.name})`;
     }
-    if (!partyKey) partyKey = await resolvePartyKey(restaurantId, table.id, table.party);
+    if (!partyKey) partyKey = await resolvePartyKey(restaurantId, primary.id, partyName);
+    // Every table of the party, merged or not — the bus event and the
+    // TableSession should name the whole footprint, not just the anchor.
+    partyTableIds = members.map((m) => m.id);
   }
   if (!tableLabel) return err(400, "tableId or tableLabel required");
 
@@ -146,6 +167,7 @@ export async function POST(req: Request) {
     await attachCheckToSession({
       restaurantId,
       tableId,
+      tableIds: partyTableIds.length ? partyTableIds : [tableId],
       checkId: check.id,
       partyKey,
       partyName,
@@ -158,7 +180,7 @@ export async function POST(req: Request) {
       ? [{
           type: "TABLE_SEATED",
           partyKey,
-          tableIds: [tableId],
+          tableIds: partyTableIds.length ? partyTableIds : [tableId],
           serverId: persistableServerId(me),
           payload: { party: partyName, partySize: p.data.guestCount, origin: "pos_walk_in" },
         }]
@@ -166,7 +188,7 @@ export async function POST(req: Request) {
     {
       type: "CHECK_OPENED",
       partyKey,
-      tableIds: tableId ? [tableId] : [],
+      tableIds: partyTableIds.length ? partyTableIds : tableId ? [tableId] : [],
       serverId: persistableServerId(me),
       checkId: check.id,
       payload: { tableLabel, guestCount: p.data.guestCount, serverName: me.name },

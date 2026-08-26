@@ -6,6 +6,9 @@
 // live table state (close + 90min, or open − 60min, or 4:00 AM when
 // hours are unset), so "decays at shift end" now means the REAL shift.
 import { prisma } from "./prisma";
+// The reset rule itself is pure and lives with the other floor
+// translation logic so it can be unit-tested without a database.
+export { latestServiceResetBoundary } from "./floor-geometry";
 
 // Fallbacks when the settings row is missing (scratch databases).
 export const SHIFT_OPEN_HOUR = 7;

@@ -41,9 +41,14 @@ type CheckFull = {
   changeCents?: number;
 };
 type FloorTable = {
-  id: string; label: string; floorId: string; x: number; y: number; w: number; h: number;
-  shape: string; capacity: number; serverId: string | null; state: string; mine: boolean;
+  id: string; label: string; floorId: string; area: string;
+  x: number; y: number; w: number; h: number;
+  shape: string; rotation: number; capacity: number;
+  serverId: string | null; state: string; mine: boolean;
   party: string | null; partySize: number | null; seatedAt: string | null;
+  // Merge context — null unless this table is part of a merged party.
+  groupId: string | null; groupLabel: string | null;
+  groupMemberIds: string[] | null; groupPrimaryId: string | null; groupCapacity: number | null;
   check: { id: string; totalCents: number; guestCount: number; openedAt: string; itemCount: number } | null;
 };
 type FloorPayload = { me: Me; servers: { id: string; name: string; color: string; role: string }[]; floors: { id: string; name: string }[]; tables: FloorTable[] };
@@ -261,31 +266,96 @@ export default function PosTerminal() {
                 ))}
               </div>
             )}
+            {/* Merge links. A merged party is one party across several
+                tables; the floor app draws a connector between them and
+                so must the terminal, or a server reads "7" and "8" as
+                two parties. The SVG shares the tiles' percent coordinate
+                space (viewBox 0..100 + preserveAspectRatio="none"), so
+                centre-to-centre lines land exactly on the tiles. */}
+            {(() => {
+              const shown = floor.tables.filter((t) => floorId == null || t.floorId === floorId);
+              const groups = new Map<string, FloorTable[]>();
+              for (const t of shown) {
+                if (!t.groupId) continue;
+                groups.set(t.groupId, [...(groups.get(t.groupId) ?? []), t]);
+              }
+              if (!groups.size) return null;
+              const centre = (t: FloorTable) => ({ cx: t.x + t.w / 2, cy: t.y + t.h / 2 });
+              return (
+                <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                  {[...groups.values()].flatMap((members) => {
+                    if (members.length < 2) return [];
+                    const ordered = [...members].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+                    return ordered.slice(1).map((m, i) => {
+                      const a = centre(ordered[i]);
+                      const b = centre(m);
+                      return (
+                        <line key={`${m.groupId}-${m.id}`} x1={a.cx} y1={a.cy} x2={b.cx} y2={b.cy}
+                          stroke="var(--color-ai)" strokeWidth={0.35} strokeDasharray="1.2 1" vectorEffect="non-scaling-stroke" opacity={0.85} />
+                      );
+                    });
+                  })}
+                </svg>
+              );
+            })()}
             {floor.tables.filter((t) => floorId == null || t.floorId === floorId).map((t) => {
               const owner = floor.servers.find((s) => s.id === t.serverId);
               const accent = me.role === "manager" ? owner?.color ?? me.color : me.color;
               const sat = t.state === "sat" || !!t.check;
+              // "bussing" (guests gone, needs a busser) and "done"
+              // (check settled) mean different things on a floor and are
+              // drawn differently.
+              const bussing = t.state === "bussing" && !t.check;
               const done = t.state === "done" && !t.check;
+              const merged = !!t.groupId && (t.groupMemberIds?.length ?? 0) > 1;
+              // Only the primary of a merge carries the party/check
+              // read-out; the others show a quiet "· 8" pointer so the
+              // same money is never displayed twice.
+              const isPrimary = !merged || t.groupPrimaryId === t.id;
               const base: React.CSSProperties = {
                 left: `${t.x}%`, top: `${t.y}%`, width: `${t.w}%`, height: `${t.h}%`,
                 borderRadius: t.shape === "round" ? "999px" : "14px",
+                ...(t.rotation ? { transform: `rotate(${t.rotation}deg)` } : {}),
               };
               const style: React.CSSProperties = t.mine
                 ? sat
                   ? { ...base, border: `2px solid ${accent}`, background: `${accent}1f`, boxShadow: `0 0 0 3px ${accent}22` }
+                  : bussing
+                  ? { ...base, border: "2px solid var(--color-state-reserved)", background: "var(--color-state-reservedBg)" }
                   : done
                   ? { ...base, border: "2px solid var(--color-state-avail)", background: "var(--color-state-availBg)" }
                   : { ...base, border: `2px solid ${accent}66`, background: "var(--color-panel-card)" }
                 : { ...base, border: "2px solid var(--color-border)", background: "var(--color-panel-card)", opacity: 0.32 };
+              const subtitleColor = t.mine
+                ? sat ? accent
+                  : bussing ? "var(--color-state-reserved)"
+                  : done ? "var(--color-state-avail)"
+                  : "var(--color-ink-400)"
+                : "var(--color-ink-400)";
+              const otherMembers = merged
+                ? (t.groupMemberIds ?? []).filter((id) => id !== t.id).length
+                : 0;
               return (
                 <button key={t.id} onClick={() => openTable(t)} disabled={!t.mine}
                   className="absolute flex flex-col items-center justify-center gap-0.5" style={style}>
-                  <span className="font-bold text-ink-50 text-[15px]">{t.label}</span>
-                  <span className="text-[11px]" style={{ color: t.mine ? (sat ? accent : done ? "var(--color-state-avail)" : "var(--color-ink-400)") : "var(--color-ink-400)" }}>
-                    {t.check ? `${usd(t.check.totalCents)} · ${t.check.guestCount} · ${ageMinutes(t.check.openedAt)}m`
-                      : sat ? `${t.party ?? "seated"}${t.partySize ? ` · ${t.partySize}` : ""}${t.seatedAt ? ` · ${ageMinutes(t.seatedAt)}m` : ""}`
-                      : done ? "done" : "—"}
-                  </span>
+                  {/* Counter-rotate the text so a rotated table stays readable. */}
+                  <div className="flex flex-col items-center justify-center gap-0.5"
+                    style={t.rotation ? { transform: `rotate(${-t.rotation}deg)` } : undefined}>
+                    <span className="text-[8px] tracking-[0.14em] uppercase text-ink-400 leading-none">
+                      {merged ? `${t.groupCapacity}-top merged` : `${t.capacity}-top`}
+                    </span>
+                    <span className="font-bold text-ink-50 text-[15px] leading-none">
+                      {merged && isPrimary ? t.groupLabel : t.label}
+                    </span>
+                    <span className="text-[11px] leading-none" style={{ color: subtitleColor }}>
+                      {merged && !isPrimary
+                        ? `+${otherMembers} merged`
+                        : t.check ? `${usd(t.check.totalCents)} · ${t.check.guestCount} · ${ageMinutes(t.check.openedAt)}m`
+                        : sat ? `${t.party ?? "seated"}${t.partySize ? ` · ${t.partySize}` : ""}${t.seatedAt ? ` · ${ageMinutes(t.seatedAt)}m` : ""}`
+                        : bussing ? "bussing"
+                        : done ? "done" : "—"}
+                    </span>
+                  </div>
                 </button>
               );
             })}
@@ -298,9 +368,11 @@ export default function PosTerminal() {
                 <span><i className="inline-block w-2.5 h-2.5 rounded-full mr-1.5 align-middle" style={{ background: me.color }} />your section</span>
               )}
               <span><i className="inline-block w-2.5 h-2.5 rounded-full mr-1.5 align-middle bg-state-avail" />done</span>
+              <span><i className="inline-block w-2.5 h-2.5 rounded-full mr-1.5 align-middle bg-state-reserved" />bussing</span>
+              <span><i className="inline-block w-4 h-0 mr-1.5 align-middle border-t-2 border-dashed" style={{ borderColor: "var(--color-ai)" }} />merged</span>
             </div>
             <div className="absolute bottom-3 right-4 text-xs text-ink-400">
-              Default floorplan — live Travola floor connects at integration
+              Live Travola floor · sections, merges and seating in real time
             </div>
           </div>
         )}
