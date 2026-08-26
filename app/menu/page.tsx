@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, usd } from "@/lib/ui";
+import MenuImporter from "@/components/MenuImporter";
 
 type Mod = { id: string; name: string; priceCents: number };
 type ModGroup = { id: string; name: string; minSelect: number; maxSelect: number; modifiers: Mod[] };
@@ -40,6 +41,13 @@ export default function MenuBuilder() {
         <Link href="/" className="text-ink-400 hover:text-ink-50 text-sm">←</Link>
         <h1 className="text-xl font-semibold text-ink-50">Menu builder</h1>
       </header>
+
+      {/* Import — first, because on day one an empty menu is the whole
+          problem a new restaurant has. */}
+      <MenuImporter
+        stationKeys={menu.stations.map((s) => s.key)}
+        onCommitted={(summary) => { load(); flash(`Menu saved — ${summary}`); }}
+      />
 
       {/* stations + tax */}
       <section className="rounded-2xl bg-panel-card border border-border p-4 mb-6">
